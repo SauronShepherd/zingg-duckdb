@@ -8,7 +8,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 
 | Area | Evidence | Result |
 |---|---|---|
-| Java unit/contract coverage | `./mvnw.cmd test` | 45 tests passed; 0 failures; 0 errors |
+| Java unit/contract coverage | `./mvnw.cmd test` | 46 tests passed; 0 failures; 0 errors |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 5 tests passed |
 | JDBC lifecycle | `JdbcLifecycleProbe` against DuckDB JDBC 1.5.5.1 | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed |
 | Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
@@ -55,7 +55,7 @@ The latest audit remediation pass added and verified the following changes:
 - RSS observability uses `/proc/self/status` on Linux and standard `tasklist`/`ps` fallbacks on Windows/macOS; the current-platform regression test requires a positive measurement. Cross-platform CI confirmation remains a release gate.
 - RSS subprocess fallbacks are bounded by a two-second timeout and forcibly terminated on timeout, preventing diagnostics from blocking the worker.
 - GitHub Actions now uses `actions/setup-java@v5` and explicitly checks `test -x ./mvnw` on Unix runners, guarding the previously observed wrapper-permission failure. Hosted-matrix execution remains pending external CI evidence.
-- Predicate partitioning now has the explicit `partitionByPredicate` API name, while `split(Expression)` remains a compatibility alias; the Zingg-shaped string-splitting overload is distinct. The complete 45-test Java suite still passes.
+- Predicate partitioning now has the explicit `partitionByPredicate` API name, while `split(Expression)` remains a compatibility alias; the Zingg-shaped string-splitting overload is distinct. Direct matching/remaining-count coverage passes, and the complete 46-test Java suite passes.
 - Backend-native blocking histograms now use a distinct `duckdb-native-0.1` profile, `0.1.0` version, and `BACKEND_BLOCKING_HISTOGRAM` model type; strict `zingg-0.7.0` blocking-tree artifacts remain separately validated. The full 44-test Java suite passed.
 - Model loading now rejects mixed strict/backend profile, version, and model-type identities; the full 45-test Java suite passed after this guard was added.
 

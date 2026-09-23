@@ -52,4 +52,19 @@ class DuckFrameMetadataTest {
       assertEquals("[a, b]", String.valueOf(split.collect().get(0).get("parts")));
     }
   }
+
+  @Test
+  void predicatePartitionHasExplicitNameAndAlias(@TempDir Path temp) {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("partition.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config); var job = runtime.openJob()) {
+      var frame = job.sql("select * from range(4) t(value)");
+      var named = frame.partitionByPredicate(new io.zingg.duckdb.engine.DuckExpr("value % 2 = 0"));
+      var alias = frame.split(new io.zingg.duckdb.engine.DuckExpr("value % 2 = 0"));
+      assertEquals(2, named.matching().count());
+      assertEquals(2, named.remaining().count());
+      assertEquals(named.matching().count(), alias.matching().count());
+      assertEquals(named.remaining().count(), alias.remaining().count());
+    }
+  }
 }
