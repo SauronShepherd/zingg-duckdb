@@ -39,4 +39,14 @@ class GraphOutputTest {
     assertEquals(0d, result.get(0).min());
     assertEquals(.8d, result.get(0).max());
   }
+
+  @Test
+  void entityScoresHandlesAChainWithoutRepeatedEdgeScans() {
+    var edges = new java.util.ArrayList<GraphOutput.Edge>();
+    for (long id = 1; id < 301; id++) edges.add(edge(id, id + 1, .5));
+    var result = GraphOutput.entityScores(edges, () -> 1700000000000L);
+    assertEquals(301, result.size());
+    assertEquals(0d, result.get(0).min());
+    assertEquals(.5d, result.get(0).max());
+  }
 }
