@@ -4,7 +4,7 @@
 
 ![Zingg DuckDB logo](assets/zingg-duckdb-logo.png)
 
-Zingg DuckDB gives a Python-friendly control plane a durable Java/DuckDB data plane. It preserves jobs, frames, phases, model artifacts, compatibility functions, graph outputs, and legacy imports while replacing Spark-bound execution with a local, resource-bounded DuckDB runtime.
+Zingg DuckDB gives a Python-friendly control plane a durable Java/DuckDB data plane. It provides job and frame lifecycles, an explicit phase-registration boundary, model artifacts, compatibility functions, graph outputs, and isolated legacy-import tooling while replacing Spark-bound execution with a local, resource-bounded DuckDB runtime. See the [validation status](docs/validation-status.md) for the verified scope and remaining parity gates.
 
 ## Design principles
 
