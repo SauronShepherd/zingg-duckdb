@@ -9,6 +9,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 | Area | Evidence | Result |
 |---|---|---|
 | Java unit/contract coverage | `./mvnw.cmd test` | 46 tests passed; 0 failures; 0 errors |
+| Maven lifecycle | `./mvnw.cmd verify` | Full 9-module reactor completed successfully; tests, JAR packaging, and shaded worker packaging passed |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 5 tests passed |
 | JDBC lifecycle | `JdbcLifecycleProbe` against DuckDB JDBC 1.5.5.1 | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed |
 | Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
