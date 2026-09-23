@@ -15,6 +15,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 | Performance | `BenchmarkMain` at sizes 100, 500, 1000, and 2000 | Baselines recorded under `benchmarks/` |
 | Package integrity | `packaging/package.ps1 -Output dist-current -CreateJre` plus `verify-package.ps1 -RequireJre` | Fresh Windows package build, dependency purity, locks, source archive, SHA-256 verification, bundled-Java metadata, and package verification passed |
 | Source quality | `git diff --check`, Python syntax compilation | Passed |
+| Runtime purity boundary | `packaging/check-pure-runtime.ps1 -Root .` | Passed; normal engine/runtime artifacts contain no forbidden Spark, Scala, GraphFrames, Py4J, JPype, or `zingg.*` dependencies |
 | DuckDB canary resolution | Published Maven Central lanes 1.4.5.0 and 1.4.4.0 selected; 1.5.6 and 2.0.0 were rejected as unavailable coordinates | Both versions completed full reactor package builds and passed the JDBC lifecycle probe; pinned 1.5.5.1 build restored |
 | Bundled-Java launch | Packaged `runtime/java/bin/java.exe -jar worker/runtime-worker-0.1.0-SNAPSHOT.jar` | `ping`, `status`, and `shutdown` passed without using the system Java executable |
 | Worker negative paths | Packaged worker malformed-operation and >8 MiB input followed by valid requests | Structured errors emitted; worker recovered and completed `ping`/`shutdown` |
