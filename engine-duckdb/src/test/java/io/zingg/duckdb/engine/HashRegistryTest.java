@@ -32,4 +32,12 @@ class HashRegistryTest {
     assertThrows(DuckException.class, () -> registry.apply("missing", "x"));
     assertThrows(DuckException.class, () -> registry.register("lower", value -> value));
   }
+
+  @Test
+  void zinggJaccardNormalizesNullEmptyCaseAndPunctuation() {
+    assertEquals(1.0, SimilarityFunctions.jaccard(null, "value"));
+    assertEquals(1.0, SimilarityFunctions.jaccard("", "value"));
+    assertEquals(1.0, SimilarityFunctions.jaccard("Slashes/And:Colons.,", "slashes and colons"));
+    assertEquals(0.0, SimilarityFunctions.jaccard("alpha", "beta"));
+  }
 }

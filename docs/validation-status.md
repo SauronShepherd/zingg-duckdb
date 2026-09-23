@@ -8,7 +8,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 
 | Area | Evidence | Result |
 |---|---|---|
-| Java unit/contract coverage | `./mvnw.cmd test` | 32 tests passed; 0 failures; 0 errors |
+| Java unit/contract coverage | `./mvnw.cmd test` | 33 tests passed; 0 failures; 0 errors |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 4 tests passed |
 | JDBC lifecycle | `JdbcLifecycleProbe` against DuckDB JDBC 1.5.5.1 | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed |
 | Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
@@ -35,6 +35,7 @@ The latest audit remediation pass added and verified the following changes:
 - Versioned worker payloads preserve delimiter-rich paths and SQL expressions without nested `|`/`;` parsing.
 - Candidate self-joins now emit deterministic left columns plus `z_`-prefixed right columns; pair-shape regression coverage passes.
 - Imported/native classifier scoring now uses the classifier-owned threshold and emits `z_prediction` before filtering.
+- Strict-profile Jaccard regression vectors now cover null/empty, case normalization, punctuation normalization, and dissimilar values.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 
