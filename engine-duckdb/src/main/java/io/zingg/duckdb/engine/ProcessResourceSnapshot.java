@@ -24,8 +24,8 @@ final class ProcessResourceSnapshot {
       var process=windows
           ? new ProcessBuilder("tasklist","/FI","PID eq "+pid,"/FO","CSV","/NH").redirectErrorStream(true).start()
           : new ProcessBuilder("ps","-o","rss=","-p",Long.toString(pid)).redirectErrorStream(true).start();
+      if(!process.waitFor(2,java.util.concurrent.TimeUnit.SECONDS)){process.destroyForcibly();return -1;}
       String output=new String(process.getInputStream().readAllBytes(),java.nio.charset.StandardCharsets.UTF_8).trim();
-      process.waitFor();
       if(output.isBlank())return -1;
       if(windows){var matcher=java.util.regex.Pattern.compile("([0-9.,]+)\\s*K[B]?").matcher(output);if(matcher.find())return Long.parseLong(matcher.group(1).replaceAll("[^0-9]", ""))*1024L;}
       else {String value=output.replaceAll("[^0-9].*$","").trim();if(!value.isBlank())return Long.parseLong(value)*1024L;}

@@ -52,6 +52,7 @@ The latest audit remediation pass added and verified the following changes:
 - The strict compatibility profile now persists `jaroWinklerDelegatesToJaro=true` and `profileSemantics=strict-released-quirks` in both Java and packaging manifests; a regression test passes.
 - Python distribution boundary remains explicit: the source wheel contains the control-plane package only, while the verified standalone bundle contains the worker JAR and private Java runtime. A plain `pip install` cannot satisfy the no-system-Java contract until a platform-wheel/bundle distribution design is selected.
 - RSS observability uses `/proc/self/status` on Linux and standard `tasklist`/`ps` fallbacks on Windows/macOS; the current-platform regression test requires a positive measurement. Cross-platform CI confirmation remains a release gate.
+- RSS subprocess fallbacks are bounded by a two-second timeout and forcibly terminated on timeout, preventing diagnostics from blocking the worker.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 
