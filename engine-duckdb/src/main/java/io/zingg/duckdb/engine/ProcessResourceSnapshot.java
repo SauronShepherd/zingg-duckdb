@@ -9,8 +9,7 @@ final class ProcessResourceSnapshot {
 
   static long residentBytes() {
     Path status = Path.of("/proc/self/status");
-    if (!Files.isRegularFile(status)) return -1;
-    try {
+    if (Files.isRegularFile(status)) try {
       for (String line : Files.readAllLines(status)) {
         if (line.startsWith("VmRSS:")) {
           String[] parts = line.trim().split("\\s+");
@@ -19,6 +18,18 @@ final class ProcessResourceSnapshot {
         }
       }
     } catch (IOException | RuntimeException ignored) { }
+    long pid=ProcessHandle.current().pid();
+    try {
+      boolean windows=System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win");
+      var process=windows
+          ? new ProcessBuilder("tasklist","/FI","PID eq "+pid,"/FO","CSV","/NH").redirectErrorStream(true).start()
+          : new ProcessBuilder("ps","-o","rss=","-p",Long.toString(pid)).redirectErrorStream(true).start();
+      String output=new String(process.getInputStream().readAllBytes(),java.nio.charset.StandardCharsets.UTF_8).trim();
+      process.waitFor();
+      if(output.isBlank())return -1;
+      if(windows){var matcher=java.util.regex.Pattern.compile("([0-9.,]+)\\s*K[B]?").matcher(output);if(matcher.find())return Long.parseLong(matcher.group(1).replaceAll("[^0-9]", ""))*1024L;}
+      else {String value=output.replaceAll("[^0-9].*$","").trim();if(!value.isBlank())return Long.parseLong(value)*1024L;}
+    } catch (Exception ignored) { }
     return -1;
   }
 

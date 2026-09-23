@@ -8,7 +8,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 
 | Area | Evidence | Result |
 |---|---|---|
-| Java unit/contract coverage | `./mvnw.cmd test` | 42 tests passed; 0 failures; 0 errors |
+| Java unit/contract coverage | `./mvnw.cmd test` | 43 tests passed; 0 failures; 0 errors |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 5 tests passed |
 | JDBC lifecycle | `JdbcLifecycleProbe` against DuckDB JDBC 1.5.5.1 | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed |
 | Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
@@ -51,7 +51,7 @@ The latest audit remediation pass added and verified the following changes:
 - Arrow egress experiment: direct Arrow Java 19 `ArrowFileWriter` round-trip was attempted and rejected by the runtime with `UnsupportedOperationException: sun.misc.Unsafe or java.nio.DirectByteBuffer.<init>(long, int) not available`; the experiment was removed, so offline-safe Arrow egress remains an explicit blocker rather than an unverified claim.
 - The strict compatibility profile now persists `jaroWinklerDelegatesToJaro=true` and `profileSemantics=strict-released-quirks` in both Java and packaging manifests; a regression test passes.
 - Python distribution boundary remains explicit: the source wheel contains the control-plane package only, while the verified standalone bundle contains the worker JAR and private Java runtime. A plain `pip install` cannot satisfy the no-system-Java contract until a platform-wheel/bundle distribution design is selected.
-- RSS observability is implemented from `/proc/self/status` on Linux; Windows/macOS currently report `-1` when no portable JVM-level RSS source is available. Cross-platform RSS measurement remains a CI/operations gate, not an unverified feature claim.
+- RSS observability uses `/proc/self/status` on Linux and standard `tasklist`/`ps` fallbacks on Windows/macOS; the current-platform regression test requires a positive measurement. Cross-platform CI confirmation remains a release gate.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 
