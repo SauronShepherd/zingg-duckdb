@@ -15,6 +15,8 @@ public final class SimilarityRegistry {
     functions.put("exact", SimilarityFunctions::exact);
     functions.put("jaccard", SimilarityFunctions::jaccard);
     functions.put("normalized_levenshtein", SimilarityFunctions::normalizedLevenshtein);
+    functions.put("jaro", SimilarityFunctions::jaro);
+    functions.put("jaro_winkler", SimilarityFunctions::jaro);
   }
   public Set<String> names() { return Collections.unmodifiableSet(functions.keySet()); }
   public double apply(String name, String left, String right) {

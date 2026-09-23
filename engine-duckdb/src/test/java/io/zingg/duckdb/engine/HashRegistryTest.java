@@ -40,4 +40,14 @@ class HashRegistryTest {
     assertEquals(1.0, SimilarityFunctions.jaccard("Slashes/And:Colons.,", "slashes and colons"));
     assertEquals(0.0, SimilarityFunctions.jaccard("alpha", "beta"));
   }
+
+  @Test
+  void strictJaroWinklerAliasUsesReleasedJaroSemantics() {
+    assertEquals(0.944444, SimilarityFunctions.jaro("MARTHA", "MARHTA"), 1e-6);
+    assertEquals(1.0, SimilarityFunctions.jaro("same", "same"));
+    assertEquals(0.0, SimilarityFunctions.jaro("a", "z"));
+    var registry = new SimilarityRegistry();
+    assertEquals(registry.apply("jaro", "DIXON", "DICKSONX"),
+        registry.apply("jaro_winkler", "DIXON", "DICKSONX"));
+  }
 }
