@@ -8,7 +8,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 
 | Area | Evidence | Result |
 |---|---|---|
-| Java unit/contract coverage | `./mvnw.cmd test` | 47 tests passed; 0 failures; 0 errors |
+| Java unit/contract coverage | `./mvnw.cmd test` | 48 tests passed; 0 failures; 0 errors |
 | Maven lifecycle | `./mvnw.cmd verify` | Full 9-module reactor completed successfully; tests, JAR packaging, and shaded worker packaging passed |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 5 tests passed |
 | Local Python compatibility matrix | `py -3.10`, `py -3.11`, `py -3.12`, `py -3.13`, and `py -3.14` syntax compilation plus unittest discovery | All five interpreters passed all 5 control-plane tests; hosted CI matrix remains required for clean-runner evidence |
@@ -67,7 +67,8 @@ The latest audit remediation pass added and verified the following changes:
 - The hosted validation job now pins its Python control-plane runtime to 3.10 through `actions/setup-python@v5`; local Python metadata and tests are aligned with that declared baseline.
 - CI now includes a dedicated Python 3.10–3.14 matrix job for syntax and control-plane unit validation; hosted execution remains pending.
 - Predicate partitioning now has the explicit `partitionByPredicate` API name, while `split(Expression)` remains a compatibility alias; the Zingg-shaped string-splitting overload is distinct. Direct matching/remaining-count coverage passes, and the complete 47-test Java suite passes.
-- Duplicate phase registrations now fail explicitly instead of silently replacing an executor; the full 47-test Java suite passes.
+- Duplicate phase registrations now fail explicitly instead of silently replacing an executor; this remains covered by the full 48-test Java suite.
+- Added low-resource runtime coverage confirming configured `memory_limit`, `max_temp_directory_size`, and thread count are applied and observable through diagnostics; targeted resource tests pass, with the full suite now at 48 tests.
 - A fresh benchmark smoke run completed at size 1000 with 3 repetitions: startup median 30.899 ms, SQL median 1.575 ms, and graph median 91.487 ms on the current Windows/JDK 21/DuckDB JDBC 1.5.5.1 environment. This is observational evidence only; release thresholds remain unestablished.
 - Backend-native blocking histograms now use a distinct `duckdb-native-0.1` profile, `0.1.0` version, and `BACKEND_BLOCKING_HISTOGRAM` model type; strict `zingg-0.7.0` blocking-tree artifacts remain separately validated. The current full 46-test Java suite passes.
 - Model loading rejects mixed strict/backend profile, version, and model-type identities; this remains covered by the current 46-test Java suite.
