@@ -70,4 +70,14 @@ class ModelFormatTest {
         new ImportProvenance("fixture/histogram", "0.1.0", "native-trainer", Instant.now(), ""));
     assertEquals("BACKEND_BLOCKING_HISTOGRAM", ModelReader.load(artifact, 1024).manifest().modelType());
   }
+
+  @Test
+  void readerRejectsMixedNativeAndStrictIdentity(@TempDir Path temp) throws Exception {
+    byte[] payload = "{\"kind\":\"duckdb-blocking-histogram\",\"blockingFrequencies\":[]}".getBytes(StandardCharsets.UTF_8);
+    var manifest = new ModelManifest("zingg-0.7.0", "0.7.0", ModelFormat.CURRENT,
+        "BACKEND_BLOCKING_HISTOGRAM", List.of(), "");
+    var artifact = new ModelArtifactWriter(temp.resolve("mixed")).write(manifest, payload,
+        new ImportProvenance("fixture/mixed", "0.7.0", "test-importer", Instant.now(), ""));
+    assertThrows(DuckException.class, () -> ModelReader.load(artifact, 1024));
+  }
 }

@@ -17,6 +17,9 @@ public final class ModelReader {
     if(!Set.of("BLOCKING_TREE","BACKEND_BLOCKING_HISTOGRAM","CLASSIFIER").contains(type))throw new DuckException("unsupported model type: "+type);
     ModelFormat.requireSupported(format);
     if(!"0.7.0".equals(version)&&!"0.1.0".equals(version))throw new DuckException("unsupported model version: "+version);
+    boolean backendHistogram=ModelType.BACKEND_BLOCKING_HISTOGRAM.name().equals(type);
+    if(backendHistogram != "duckdb-native-0.1".equals(profile) || backendHistogram != "0.1.0".equals(version))
+      throw new DuckException("model profile, version, and type are inconsistent");
     if(hash.isBlank()||!hash.equalsIgnoreCase(NativeModelStore.sha256(bytes)))throw new DuckException("model checksum mismatch");
     Path provenance=dir.resolve("provenance.json");if(!Files.isRegularFile(provenance))throw new DuckException("model provenance is missing");String provenanceJson=Files.readString(provenance);String provenanceHash=field(provenanceJson,"sha256");if(!hash.equalsIgnoreCase(provenanceHash))throw new DuckException("provenance checksum mismatch");if(field(provenanceJson,"sourcePath").isBlank()||field(provenanceJson,"importerVersion").isBlank())throw new DuckException("model provenance is incomplete");
     if (format.equals("zingg-0.1-native")) validateNativePayload(type, bytes);
