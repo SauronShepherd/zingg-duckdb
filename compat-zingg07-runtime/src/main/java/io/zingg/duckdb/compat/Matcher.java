@@ -11,7 +11,7 @@ public final class Matcher {
     if(input==null||config==null)throw new DuckException("candidate input and config are required");
     if(!input.columns().contains(config.idColumn()))throw new DuckException("match id column is not present: "+config.idColumn());
     if(!input.columns().contains(config.blockingColumn()))throw new DuckException("blocking column is not present: "+config.blockingColumn());
-    String l="l",r="r";return input.join(input,l+"."+quote(config.blockingColumn())+" = "+r+"."+quote(config.blockingColumn())+" AND "+l+"."+quote(config.idColumn())+" < "+r+"."+quote(config.idColumn()));
+    String l="l",r="r";return input.joinProjected(input,l+"."+quote(config.blockingColumn())+" = "+r+"."+quote(config.blockingColumn())+" AND "+l+"."+quote(config.idColumn())+" < "+r+"."+quote(config.idColumn()),"z_");
   }
   public Frame score(Frame candidates,MatchConfig config){return candidates.withColumn("z_score",new io.zingg.duckdb.engine.DuckExpr(config.scoreExpression())).filter(new io.zingg.duckdb.engine.DuckExpr("z_score >= "+config.threshold()));}
   /** Scores numeric feature columns with a validated native linear classifier. */

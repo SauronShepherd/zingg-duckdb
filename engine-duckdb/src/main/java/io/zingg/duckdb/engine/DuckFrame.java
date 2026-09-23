@@ -107,6 +107,14 @@ final class DuckFrame implements Frame {
     return new DuckFrame(job,"SELECT * EXCLUDE ("+DuckExpr.quote(from)+"), "+DuckExpr.quote(from)+" AS "+DuckExpr.quote(to)+" FROM ("+plan+") zd",renamed);
   }
   public Frame join(Frame right,String condition){same(right);return q("SELECT * FROM ("+plan+") l JOIN ("+((DuckFrame)right).plan+") r ON "+SqlSafety.predicate(condition));}
+  public Frame joinProjected(Frame right,String condition,String rightPrefix){
+    same(right); if(rightPrefix==null||rightPrefix.isBlank())throw new DuckException("right column prefix is required");
+    DuckFrame other=(DuckFrame)right; var leftColumns=availableColumns(); var rightColumns=other.availableColumns();
+    var output=new ArrayList<String>(leftColumns); var projections=new ArrayList<String>();
+    for(String column:leftColumns){projections.add("l."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));}
+    for(String column:rightColumns){String alias=rightPrefix+column;if(output.contains(alias))throw new DuckException("projected pair column collision: "+alias);projections.add("r."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(alias));output.add(alias);}
+    return new DuckFrame(job,"SELECT "+String.join(",",projections)+" FROM ("+plan+") l JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition),output);
+  }
   public Frame union(Frame other,boolean byName,boolean allowMissing){
     same(other);
     DuckFrame right=(DuckFrame)other;
