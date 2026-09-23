@@ -41,4 +41,15 @@ class DuckFrameMetadataTest {
           () -> job.sql("select 'a very long value' as value").collect());
     }
   }
+
+  @Test
+  void zinggSplitCreatesStringArrayColumn(@TempDir Path temp) {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("split.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config); var job = runtime.openJob()) {
+      var split = job.sql("select 'a|b' as value").split("value", "|", "parts");
+      assertEquals(java.util.List.of("parts"), split.columns());
+      assertEquals("[a, b]", String.valueOf(split.collect().get(0).get("parts")));
+    }
+  }
 }
