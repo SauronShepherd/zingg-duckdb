@@ -49,21 +49,24 @@ final class ConfiguredWorkerServer implements AutoCloseable {
   }
 
   private String run(String payload) {
-    String[] p=payload.split("\\|",-1);
-    if(p.length!=4&&p.length!=5) throw new IllegalArgumentException("run payload: phase|input1;input2|output|predicate[|classifierModel]");
-    var inputs=Arrays.stream(p[1].split(";",-1)).filter(x->!x.isBlank()).map(Path::of).toList();
-    Path model=p.length==5&&!p[4].isBlank()?Path.of(p[4]):null;
-    var config=new PipelineConfig(ZinggJob.Phase.valueOf(p[0]),inputs,Path.of(p[2]),p[3],paths,null,model,maxModelBytes,maxOutputBytes);
+    String[] p=PayloadCodec.decode(payload, -1);
+    if(p.length<5) throw new IllegalArgumentException("run payload requires phase, output, predicate, model, and input fields");
+    var inputs=Arrays.stream(p,4,p.length).filter(x->!x.isBlank()).map(Path::of).toList();
+    Path model=!p[3].isBlank()?Path.of(p[3]):null;
+    var config=new PipelineConfig(ZinggJob.Phase.valueOf(p[0]),inputs,Path.of(p[1]),p[2],paths,null,model,maxModelBytes,maxOutputBytes);
     return Long.toString(new ZinggPipeline(runtime).execute(config).outputRows());
   }
 
   private String train(String payload) {
-    String[] p=payload.split("\\|",-1);
-    if(p.length!=5 && p.length!=9) throw new IllegalArgumentException("train payload: blocking=input1;input2|artifact|blockingExpression|blockingColumn|maxRows or classifier=input1;input2|artifact|label|features|maxRows|iterations|learningRate|l2|profile");
-    var inputs=Arrays.stream(p[0].split(";",-1)).filter(x->!x.isBlank()).map(Path::of).toList();
+    String[] p=PayloadCodec.decode(payload, -1);
+    if(p.length<6 && p.length!=10) throw new IllegalArgumentException("train payload requires 5 or 9 control fields plus input fields");
+    boolean classifier=p.length>=10;
+    int control=classifier?9:5;
+    if(p.length<=control) throw new IllegalArgumentException("train payload requires at least one input");
+    var inputs=Arrays.stream(p,control,p.length).filter(x->!x.isBlank()).map(Path::of).toList();
     try(var job=new ZinggJob(runtime)) {
       var frame=job.read(inputs,ZinggJob.Phase.TRAIN,paths);
-      if (p.length==9) {
+      if (classifier) {
         var features=Arrays.stream(p[3].split(",",-1)).filter(x->!x.isBlank()).toList();
         var config=new NativeClassifierTrainer.Config(p[8],features,p[2],paths.output(Path.of(p[1])),Integer.parseInt(p[5]),Double.parseDouble(p[6]),Double.parseDouble(p[7]),Long.parseLong(p[4]));
         return new NativeClassifierTrainer().train(frame,config).artifactDirectory().toString();

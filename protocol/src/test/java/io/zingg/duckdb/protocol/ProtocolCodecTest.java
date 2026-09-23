@@ -1,6 +1,7 @@
 package io.zingg.duckdb.protocol;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -23,5 +24,11 @@ class ProtocolCodecTest {
   void enforcesLineSizeLimit() {
     String oversized = "id\tmatch\t" + "x".repeat(ProtocolCodec.MAX_LINE_CHARS);
     assertThrows(IllegalArgumentException.class, () -> ProtocolCodec.decode(oversized));
+  }
+
+  @Test
+  void payloadCodecPreservesDelimiterRichPathsAndExpressions() {
+    var fields = new String[] {"/tmp/a|b;part.csv", "a || b", "C:\\data\\x.y"};
+    assertArrayEquals(fields, PayloadCodec.decode(PayloadCodec.encode(fields), -1));
   }
 }

@@ -21,6 +21,14 @@ class WorkerClientHelpersTest(unittest.TestCase):
         finally:
             client.close()
 
+    def test_structured_worker_payload_preserves_delimiters(self):
+        from zingg_duckdb.worker import _payload
+        import base64
+        encoded = _payload("/tmp/a|b;part.csv", "a || b", "C:\\data\\x.y")
+        parts = encoded.split(".")
+        values = [base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)).decode("utf-8") for part in parts[2:]]
+        self.assertEqual(["/tmp/a|b;part.csv", "a || b", "C:\\data\\x.y"], values)
+
 
 if __name__ == "__main__":
     unittest.main()
