@@ -40,6 +40,15 @@ class CompatibilityFunctionsTest {
   }
 
   @Test
+  void duplicatePhaseRegistrationFailsExplicitly() {
+    var registry = new PhaseRegistry();
+    PhaseExecutor executor = (job, input) -> input;
+    registry.register(ZinggJob.Phase.MATCH, executor);
+    assertThrows(io.zingg.duckdb.api.DuckException.class,
+        () -> registry.register(ZinggJob.Phase.MATCH, executor));
+  }
+
+  @Test
   void malformedOptionalClassifierNumbersAreRejectedInsteadOfDefaulted() {
     assertThrows(io.zingg.duckdb.api.DuckException.class,
         () -> new ModelScorerRegistry().create(new ModelReader.LoadedModel(
