@@ -8,7 +8,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 
 | Area | Evidence | Result |
 |---|---|---|
-| Java unit/contract coverage | `./mvnw.cmd test` | 41 tests passed; 0 failures; 0 errors |
+| Java unit/contract coverage | `./mvnw.cmd test` | 42 tests passed; 0 failures; 0 errors |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 5 tests passed |
 | JDBC lifecycle | `JdbcLifecycleProbe` against DuckDB JDBC 1.5.5.1 | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed |
 | Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
@@ -49,6 +49,7 @@ The latest audit remediation pass added and verified the following changes:
 - Python client coverage now verifies that `max_collect_bytes` is forwarded to the default worker command; 5/5 Python tests pass.
 - Added the Zingg-shaped string-splitting overload while retaining predicate split semantics; targeted metadata and structural capability tests pass, with differential parity still open.
 - Arrow egress experiment: direct Arrow Java 19 `ArrowFileWriter` round-trip was attempted and rejected by the runtime with `UnsupportedOperationException: sun.misc.Unsafe or java.nio.DirectByteBuffer.<init>(long, int) not available`; the experiment was removed, so offline-safe Arrow egress remains an explicit blocker rather than an unverified claim.
+- The strict compatibility profile now persists `jaroWinklerDelegatesToJaro=true` and `profileSemantics=strict-released-quirks` in both Java and packaging manifests; a regression test passes.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 

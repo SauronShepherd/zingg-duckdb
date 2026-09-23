@@ -7,7 +7,9 @@
     "clusterIds": "epoch-millis-prefixed",
     "transitiveImpliedScore": 0.0,
     "blockingHash": "java-string-hashcode-signed-int",
-    "similarities": ["exact", "jaccard", "normalized_levenshtein"],
+    "similarities": ["exact", "jaccard", "normalized_levenshtein", "jaro", "jaro_winkler"],
+    "jaroWinklerDelegatesToJaro": true,
+    "profileSemantics": "strict-released-quirks",
     "trainingUnion": "positional",
     "matchUnion": "by-name-allow-missing-columns"
   },

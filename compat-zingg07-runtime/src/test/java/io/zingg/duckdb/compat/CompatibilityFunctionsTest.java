@@ -48,4 +48,11 @@ class CompatibilityFunctionsTest {
             "{\"kind\":\"linear-classifier\",\"features\":[\"score\"],\"weights\":[1],\"threshold\":\"bad\"}"
                 .getBytes(StandardCharsets.UTF_8))));
   }
+
+  @Test
+  void strictProfilePersistsReleasedSimilarityQuirk() {
+    var profile = new ProfileRegistry().require("zingg-0.7.0-duckdb-1.5.5.1");
+    assertEquals("true", profile.rules().get("jaroWinklerDelegatesToJaro"));
+    assertEquals("strict-released-quirks", profile.rules().get("profileSemantics"));
+  }
 }
