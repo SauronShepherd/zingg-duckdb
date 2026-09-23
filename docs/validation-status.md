@@ -51,6 +51,7 @@ The latest audit remediation pass added and verified the following changes:
 - Arrow egress experiment: direct Arrow Java 19 `ArrowFileWriter` round-trip was attempted and rejected by the runtime with `UnsupportedOperationException: sun.misc.Unsafe or java.nio.DirectByteBuffer.<init>(long, int) not available`; the experiment was removed, so offline-safe Arrow egress remains an explicit blocker rather than an unverified claim.
 - The strict compatibility profile now persists `jaroWinklerDelegatesToJaro=true` and `profileSemantics=strict-released-quirks` in both Java and packaging manifests; a regression test passes.
 - Python distribution boundary remains explicit: the source wheel contains the control-plane package only, while the verified standalone bundle contains the worker JAR and private Java runtime. A plain `pip install` cannot satisfy the no-system-Java contract until a platform-wheel/bundle distribution design is selected.
+- RSS observability is implemented from `/proc/self/status` on Linux; Windows/macOS currently report `-1` when no portable JVM-level RSS source is available. Cross-platform RSS measurement remains a CI/operations gate, not an unverified feature claim.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 
