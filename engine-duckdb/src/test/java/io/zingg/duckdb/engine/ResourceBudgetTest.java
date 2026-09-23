@@ -14,4 +14,11 @@ class ResourceBudgetTest {
     budget.enforceInputBytes(10);
     budget.enforceOutputBytes(20);
   }
+
+  @Test
+  void collectBudgetIsIndependentAndEnforced() {
+    var budget = new ResourceBudget(0, 0, 0, 0, 16, 0);
+    assertThrows(DuckException.class, () -> budget.enforceCollectBytes(17));
+    budget.enforceCollectBytes(16);
+  }
 }

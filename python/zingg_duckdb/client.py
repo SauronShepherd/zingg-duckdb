@@ -7,7 +7,7 @@ from pathlib import Path
 class WorkerClient:
     MAX_LINE_CHARS = 8 * 1024 * 1024
     OPERATION = re.compile(r"^[A-Za-z0-9_.-]+$")
-    def __init__(self, command: list[str] | None = None, database: str = ":memory:", *, input_root: str | None = None, output_root: str | None = None, threads: int | None = None, memory_bytes: int | None = None, max_temp_bytes: int | None = None, max_jobs: int | None = None, max_rows: int | None = None, max_spill_bytes: int | None = None, max_model_bytes: int | None = None, max_output_bytes: int | None = None, offline: bool = True, allowed_extensions: list[str] | None = None, unsafe_debug_sql: bool = False):
+    def __init__(self, command: list[str] | None = None, database: str = ":memory:", *, input_root: str | None = None, output_root: str | None = None, threads: int | None = None, memory_bytes: int | None = None, max_temp_bytes: int | None = None, max_jobs: int | None = None, max_rows: int | None = None, max_spill_bytes: int | None = None, max_collect_bytes: int | None = None, max_model_bytes: int | None = None, max_output_bytes: int | None = None, offline: bool = True, allowed_extensions: list[str] | None = None, unsafe_debug_sql: bool = False):
         if command is None:
             root = Path(__file__).resolve().parents[2]
             bundled = root / "runtime" / "java" / "bin" / ("java.exe" if __import__("os").name == "nt" else "java")
@@ -28,7 +28,7 @@ class WorkerClient:
             if not offline: self._command.append("--online")
             if unsafe_debug_sql: self._command.append("--unsafe-debug-sql")
             for extension in allowed_extensions or []: self._command.extend(("--allow-extension", extension))
-            for flag, value in (("--input-root", input_root), ("--output-root", output_root), ("--threads", threads), ("--memory-bytes", memory_bytes), ("--max-temp-bytes", max_temp_bytes), ("--max-jobs", max_jobs), ("--max-rows", max_rows), ("--max-spill-bytes", max_spill_bytes), ("--max-model-bytes", max_model_bytes), ("--max-output-bytes", max_output_bytes)):
+            for flag, value in (("--input-root", input_root), ("--output-root", output_root), ("--threads", threads), ("--memory-bytes", memory_bytes), ("--max-temp-bytes", max_temp_bytes), ("--max-jobs", max_jobs), ("--max-rows", max_rows), ("--max-spill-bytes", max_spill_bytes), ("--max-collect-bytes", max_collect_bytes), ("--max-model-bytes", max_model_bytes), ("--max-output-bytes", max_output_bytes)):
                 if value is not None: self._command.extend((flag, str(value)))
         else:
             self._command = command

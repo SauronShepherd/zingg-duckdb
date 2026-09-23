@@ -8,7 +8,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 
 | Area | Evidence | Result |
 |---|---|---|
-| Java unit/contract coverage | `./mvnw.cmd test` | 38 tests passed; 0 failures; 0 errors |
+| Java unit/contract coverage | `./mvnw.cmd test` | 40 tests passed; 0 failures; 0 errors |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 4 tests passed |
 | JDBC lifecycle | `JdbcLifecycleProbe` against DuckDB JDBC 1.5.5.1 | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed |
 | Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
@@ -43,6 +43,7 @@ The latest audit remediation pass added and verified the following changes:
 - Malformed or non-finite optional classifier numeric fields now fail explicitly instead of silently applying defaults; the targeted compatibility test passed.
 - `FrameCapabilityCoverageTest` now provides an executable structural coverage guard for the complete `Frame` API, and the capability matrix documents semantic parity gaps.
 - Graph entity scoring now uses a pair-score index instead of rescanning all edges for every component pair; a 301-node chain regression passes.
+- Collection now has an independent typed byte budget (`--max-collect-bytes`); targeted row-collection and budget tests pass.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 

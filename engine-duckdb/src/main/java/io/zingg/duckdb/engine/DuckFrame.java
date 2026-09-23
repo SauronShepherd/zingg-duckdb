@@ -57,10 +57,12 @@ final class DuckFrame implements Frame {
       try(var r=s.executeQuery("SELECT * FROM ("+plan+") zd")) {
       var m=r.getMetaData(); var names=new ArrayList<String>();
       for(int i=1;i<=m.getColumnCount();i++) names.add(m.getColumnName(i));
-      var out=new ArrayList<Row>();
+      var out=new ArrayList<Row>(); long collectedBytes=0;
       while(r.next()) { cancellation.throwIfCancelled(); var values=new ArrayList<Object>();
         for(int i=1;i<=m.getColumnCount();i++) values.add(r.getObject(i));
         out.add(new Row(names,values)); job.budget().enforceRows(out.size());
+        for(Object value:values) collectedBytes += String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 1L;
+        job.budget().enforceCollectBytes(collectedBytes + (long)out.size() * 8L);
       }
       return List.copyOf(out); }
     } catch(SQLException e) { throw new DuckException("collect failed",e); }

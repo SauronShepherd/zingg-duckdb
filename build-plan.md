@@ -284,7 +284,7 @@ The attached repository audit is authoritative for the next implementation pass.
 
 - [ ] Replace extension-dependent Arrow egress with an offline-safe JDBC/Arrow IPC writer and qualify vectorized Arrow ingress.
 - [ ] Replace `max-spill-bytes` with typed input/output/collect/temp-directory budgets mapped to DuckDB settings.
-- [x] Optimize repeated graph closure edge scans and add a 301-node chain regression benchmark; byte-bounded collection remains pending.
+- [x] Add byte-bounded collection and typed collect limits; optimize repeated graph closure edge scans and retain the 301-node chain regression benchmark.
 - [ ] Add forced-spill, low-resource, cancellation, process-kill, orphan-cleanup, and concurrent-job tests.
 - [ ] Generate a complete transitive SBOM and run license/security review before release.
 - [ ] Run clean-install/no-system-Java validation on Linux, macOS, and Windows.

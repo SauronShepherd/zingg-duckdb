@@ -30,4 +30,15 @@ class DuckFrameMetadataTest {
       assertEquals(3, cached.select("value").count());
     }
   }
+
+  @Test
+  void collectEnforcesByteBudget(@TempDir Path temp) {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("collect-budget.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config);
+         var job = runtime.openJob(new ResourceBudget(0, 0, 0, 0, 16, 0))) {
+      org.junit.jupiter.api.Assertions.assertThrows(io.zingg.duckdb.api.DuckException.class,
+          () -> job.sql("select 'a very long value' as value").collect());
+    }
+  }
 }
