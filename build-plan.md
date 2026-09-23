@@ -251,3 +251,47 @@ The following backlog is added from the 2026-09-22 architecture review. These ar
 - [ ] Add extension-backed connectors only behind explicit offline/allowlist feature flags.
 - [ ] Add explain/profiling capture, benchmark history, and regression thresholds for runtime, memory, spill, and output size.
 - [ ] Prepare narrowly scoped upstream compatibility RFCs/issues only after a backend failure demonstrates the required abstraction.
+
+## Audit addendum — 2026-09-23 specification reconciliation
+
+The attached repository audit is authoritative for the next implementation pass. Its requirements are grouped below so implementation tasks remain traceable to executable evidence.
+
+### Completed during this pass
+
+- [x] Release job permits when job-schema creation fails.
+- [x] Always close job JDBC connections even when table/schema cleanup reports an error.
+- [x] Discover authoritative SQL-frame columns lazily so `sql(...).select(...)`, `withColumn`, `drop`, and `rename` compose correctly.
+- [x] Materialize cache plans once, then enforce row budgets against the materialized relation.
+- [x] Validate Python response correlation IDs and escalate worker termination to kill after timeout.
+- [x] Correct Unix CI manifest assertions and make JRE verification/metadata platform-aware.
+- [x] Correct generated project/module SBOM license declarations to AGPL-3.0-only.
+- [x] Add regression tests for lazy frame metadata and cache composition.
+
+### P0 implementation gates
+
+- [ ] Add `adapter-zingg07` compiled against the exact Zingg v0.7 generic contracts while keeping `engine-*` Spark-free.
+- [ ] Produce an executable ZFrame method-coverage report and implement capability-gated methods, including true string-splitting semantics.
+- [ ] Replace identity phase executors with explicit supported/unsupported behavior and complete FIND_TRAINING_DATA, labeling, TRAIN, MATCH, and LINK orchestration.
+- [ ] Repair ordinary file-ingress metadata and implement deterministic Zingg pair projection with `z_`-prefixed right-side fields.
+- [ ] Separate strict `zingg07-blocking-tree-v1` artifacts from backend-native blocking histograms; validate a real upstream tree.
+- [ ] Implement strict v0.7 similarity vectors and a persisted quirk registry, including Jaccard and released Jaro/Jaro-Winkler behavior.
+- [ ] Validate real v0.7 classifier artifacts, preserve vector ordering, and make imported thresholds authoritative.
+- [ ] Remove arbitrary SQL from the default worker API or isolate it behind an explicit unsafe-debug mode.
+- [ ] Replace delimiter-based nested worker payloads with structured versioned messages.
+- [ ] Make Python installation discover a worker and private Java runtime on at least one supported platform.
+
+### P1 correctness, performance, and release gates
+
+- [ ] Replace extension-dependent Arrow egress with an offline-safe JDBC/Arrow IPC writer and qualify vectorized Arrow ingress.
+- [ ] Replace `max-spill-bytes` with typed input/output/collect/temp-directory budgets mapped to DuckDB settings.
+- [ ] Add byte-bounded collection, giant-component graph benchmarks, and optimize repeated closure scans.
+- [ ] Add forced-spill, low-resource, cancellation, process-kill, orphan-cleanup, and concurrent-job tests.
+- [ ] Generate a complete transitive SBOM and run license/security review before release.
+- [ ] Run clean-install/no-system-Java validation on Linux, macOS, and Windows.
+
+### External evidence gates
+
+- [ ] Obtain real Zingg v0.7 blocking/classifier artifacts and Spark differential fixtures.
+- [ ] Confirm the intended integration boundary: standalone repository versus main Zingg `home/duckdb` module.
+- [ ] Execute the full CI matrix on hosted Unix runners after executable-mode repair.
+- [ ] Decide the distribution contract for legacy Spark importers and any external Spark prerequisite.

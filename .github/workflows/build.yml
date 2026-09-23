@@ -78,7 +78,7 @@ jobs:
         run: |
           ./mvnw -DskipTests package
           pwsh ./packaging/package.ps1 -Output dist -CreateJre
-          test -f "dist/zingg-duckdb-0.1.0/runtime-manifest.json"
+          test -f "dist/zingg-duckdb-0.1.0/config/runtime-manifest.json"
           test -f "dist/zingg-duckdb-source.zip"
       - name: Build offline package (Windows)
         if: runner.os == 'Windows'
@@ -86,7 +86,7 @@ jobs:
         run: |
           ./mvnw.cmd -DskipTests package
           ./packaging/package.ps1 -Output dist -CreateJre
-          if (!(Test-Path "dist/zingg-duckdb-0.1.0/runtime-manifest.json")) { throw "runtime manifest missing" }
+          if (!(Test-Path "dist/zingg-duckdb-0.1.0/config/runtime-manifest.json")) { throw "runtime manifest missing" }
           if (!(Test-Path "dist/zingg-duckdb-source.zip")) { throw "source archive missing" }
       - name: Upload offline package
         uses: actions/upload-artifact@v4

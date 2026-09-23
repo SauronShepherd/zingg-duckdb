@@ -23,7 +23,15 @@ final class DuckFrame implements Frame {
   public JobId owner() { return job.id(); }
   RelationScope scope() { return scope; }
   DuckRelationHandle handle() { return new DuckRelationHandle("relation_" + Integer.toHexString(System.identityHashCode(this)), scope, job.id(), job.connectionId(), plan, scope != RelationScope.QUERY_ONLY); }
-  public List<String> columns() { return columns; }
+  private List<String> availableColumns() {
+    if (!columns.isEmpty()) return columns;
+    try (var s=job.connection().createStatement(); var r=s.executeQuery("SELECT * FROM ("+plan+") zd LIMIT 0")) {
+      var m=r.getMetaData(); var out=new ArrayList<String>();
+      for(int i=1;i<=m.getColumnCount();i++) out.add(m.getColumnName(i));
+      return List.copyOf(out);
+    } catch(SQLException e) { throw new DuckException("column inspection failed",e); }
+  }
+  public List<String> columns() { return availableColumns(); }
   public List<Column> schema() {
     try (var s=job.connection().createStatement();
          var r=s.executeQuery("SELECT * FROM ("+plan+") zd LIMIT 0")) {
@@ -59,13 +67,14 @@ final class DuckFrame implements Frame {
   }
   private void same(Frame other){if(other==null||!owner().equals(other.owner()))throw new DuckException("cross-job DuckFrame operation");}
   private DuckFrame q(String sql){return new DuckFrame(job,sql,columns);}
-  public Frame select(String... c){if(c==null||c.length==0)throw new DuckException("select requires columns");var selected=Arrays.stream(c).map(x->{if(x==null||x.isBlank()||!columns.contains(x))throw new DuckException("selected column is not present: "+x);return x;}).toList();return new DuckFrame(job,"SELECT "+String.join(",",selected.stream().map(DuckExpr::quote).toList())+" FROM ("+plan+") zd",selected);}
+  public Frame select(String... c){if(c==null||c.length==0)throw new DuckException("select requires columns");var available=availableColumns();var selected=Arrays.stream(c).map(x->{if(x==null||x.isBlank()||!available.contains(x))throw new DuckException("selected column is not present: "+x);return x;}).toList();return new DuckFrame(job,"SELECT "+String.join(",",selected.stream().map(DuckExpr::quote).toList())+" FROM ("+plan+") zd",selected);}
   public Frame selectExpr(String... e){
     if(e==null||e.length==0)throw new DuckException("selectExpr requires expressions");
     var expressions=Arrays.stream(e).map(SqlSafety::predicate).toList();
+    var available=availableColumns();
     var projected=new ArrayList<String>();
     for(String expression:expressions){
-      if(expression.equals("*")){projected.addAll(columns);continue;}
+      if(expression.equals("*")){projected.addAll(available);continue;}
       var alias=java.util.regex.Pattern.compile("(?is).*\\bAS\\s+([\\\"]?[A-Za-z_][A-Za-z0-9_]*[\\\"]?)\\s*$").matcher(expression);
       if(alias.matches()) projected.add(alias.group(1).replace("\"",""));
     }
@@ -83,16 +92,18 @@ final class DuckFrame implements Frame {
   public <T> Frame withColumn(String name,T value){
     if(name==null||name.isBlank())throw new DuckException("column name is required");
     DuckExpr e=value instanceof DuckExpr d?d:DuckExpr.literal(value);
-    String prefix=columns.contains(name)?"SELECT * EXCLUDE ("+DuckExpr.quote(name)+"), ":"SELECT *, ";
-    var updated=new ArrayList<>(columns); if(!updated.contains(name))updated.add(name);
+    var available=availableColumns();
+    String prefix=available.contains(name)?"SELECT * EXCLUDE ("+DuckExpr.quote(name)+"), ":"SELECT *, ";
+    var updated=new ArrayList<>(available); if(!updated.contains(name))updated.add(name);
     return new DuckFrame(job,""+prefix+e.sql()+" AS "+DuckExpr.quote(name)+" FROM ("+plan+") zd",updated);
   }
-  public Frame drop(String... c){var d=new HashSet<>(Arrays.asList(c));var remaining=columns.stream().filter(x->!d.contains(x)).toList();return new DuckFrame(job,columns.isEmpty()?"SELECT * FROM ("+plan+") zd":"SELECT "+String.join(",",remaining.stream().map(DuckExpr::quote).toList())+" FROM ("+plan+") zd",remaining);}
+  public Frame drop(String... c){var d=new HashSet<>(Arrays.asList(c));var available=availableColumns();var remaining=available.stream().filter(x->!d.contains(x)).toList();return new DuckFrame(job,"SELECT "+String.join(",",remaining.stream().map(DuckExpr::quote).toList())+" FROM ("+plan+") zd",remaining);}
   public Frame rename(String from,String to){
     if(from==null||from.isBlank()||to==null||to.isBlank())throw new DuckException("rename columns are required");
-    if(!columns.contains(from))throw new DuckException("renamed column is not present: "+from);
-    if(columns.contains(to)&&!from.equals(to))throw new DuckException("rename target already exists: "+to);
-    var renamed=new ArrayList<>(columns); renamed.set(renamed.indexOf(from),to);
+    var available=availableColumns();
+    if(!available.contains(from))throw new DuckException("renamed column is not present: "+from);
+    if(available.contains(to)&&!from.equals(to))throw new DuckException("rename target already exists: "+to);
+    var renamed=new ArrayList<>(available); renamed.set(renamed.indexOf(from),to);
     return new DuckFrame(job,"SELECT * EXCLUDE ("+DuckExpr.quote(from)+"), "+DuckExpr.quote(from)+" AS "+DuckExpr.quote(to)+" FROM ("+plan+") zd",renamed);
   }
   public Frame join(Frame right,String condition){same(right);return q("SELECT * FROM ("+plan+") l JOIN ("+((DuckFrame)right).plan+") r ON "+SqlSafety.predicate(condition));}
@@ -109,7 +120,7 @@ final class DuckFrame implements Frame {
   }
   public Frame except(Frame other){same(other);return q("("+plan+") EXCEPT ("+((DuckFrame)other).plan+")");}
   public Frame distinct(){return q("SELECT DISTINCT * FROM ("+plan+") zd");}
-  public Frame cache(){String n="zd_cache_"+UUID.randomUUID().toString().replace("-","");try(var s=job.connection().createStatement()){try(var r=s.executeQuery("SELECT COUNT(*) FROM ("+plan+") zd")){r.next();job.budget().enforceRows(r.getLong(1));}s.execute("CREATE TABLE "+DuckExpr.quote(job.schemaName())+"."+DuckExpr.quote(n)+" AS "+plan);job.registerMaterialized(n);return new DuckFrame(job,"SELECT * FROM "+DuckExpr.quote(job.schemaName())+"."+DuckExpr.quote(n),columns,RelationScope.WORKER_SHARED);}catch(SQLException e){throw new DuckException("cache failed",e);}}
+  public Frame cache(){String n="zd_cache_"+UUID.randomUUID().toString().replace("-","");try(var s=job.connection().createStatement()){s.execute("CREATE TABLE "+DuckExpr.quote(job.schemaName())+"."+DuckExpr.quote(n)+" AS "+plan);job.registerMaterialized(n);try(var r=s.executeQuery("SELECT COUNT(*) FROM "+DuckExpr.quote(job.schemaName())+"."+DuckExpr.quote(n))){r.next();job.budget().enforceRows(r.getLong(1));}return new DuckFrame(job,"SELECT * FROM "+DuckExpr.quote(job.schemaName())+"."+DuckExpr.quote(n),availableColumns(),RelationScope.WORKER_SHARED);}catch(SQLException e){throw new DuckException("cache failed",e);}}
   public long count(){return count(CancellationToken.none());}
   public long count(CancellationToken cancellation){Objects.requireNonNull(cancellation).throwIfCancelled();try(var s=job.connection().createStatement()){if(cancellation instanceof DuckCancellation dc)dc.attach(s);try(var r=s.executeQuery("SELECT COUNT(*) FROM ("+plan+") zd")){r.next();cancellation.throwIfCancelled();long result=r.getLong(1);job.budget().enforceRows(result);return result;}}catch(SQLException e){throw new DuckException("count failed",e);}}
   public void writeCsv(java.nio.file.Path output,boolean header){copy(output,"FORMAT CSV, HEADER "+header);}

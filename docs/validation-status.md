@@ -8,7 +8,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 
 | Area | Evidence | Result |
 |---|---|---|
-| Java unit/contract coverage | `./mvnw.cmd test` | 23 tests passed; 0 failures; 0 errors |
+| Java unit/contract coverage | `./mvnw.cmd test` | 28 tests passed; 0 failures; 0 errors |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 3 tests passed |
 | JDBC lifecycle | `JdbcLifecycleProbe` against DuckDB JDBC 1.5.5.1 | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed |
 | Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
@@ -18,6 +18,21 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 | DuckDB canary resolution | Published Maven Central lanes 1.4.5.0 and 1.4.4.0 selected; 1.5.6 and 2.0.0 were rejected as unavailable coordinates | Both versions completed full reactor package builds and passed the JDBC lifecycle probe; pinned 1.5.5.1 build restored |
 | Bundled-Java launch | Packaged `runtime/java/bin/java.exe -jar worker/runtime-worker-0.1.0-SNAPSHOT.jar` | `ping`, `status`, and `shutdown` passed without using the system Java executable |
 | Worker negative paths | Packaged worker malformed-operation and >8 MiB input followed by valid requests | Structured errors emitted; worker recovered and completed `ping`/`shutdown` |
+
+## 2026-09-23 audit remediation evidence
+
+The latest audit remediation pass added and verified the following changes:
+
+- Job-slot permits are released when job-schema creation fails.
+- Job JDBC connections are closed even when cleanup statements fail.
+- SQL frames lazily discover columns, restoring composition for ordinary SQL relations and file-ingress-derived frames.
+- Cache materialization evaluates the source plan once before enforcing row limits.
+- Python validates response/request correlation and kills a worker that ignores graceful termination.
+- Unix package manifest assertions and bundled-JRE executable naming are platform-aware.
+- Project/module SBOM license declarations now match the repository AGPL-3.0-only license.
+- Regression coverage was added for frame metadata and cache composition.
+
+These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 
 ## Implemented, but still requiring dedicated validation
 

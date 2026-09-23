@@ -43,7 +43,8 @@ class WorkerClient:
         if not self.OPERATION.fullmatch(operation):
             raise ValueError("invalid worker operation")
         escape = lambda value: value.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n")
-        message = "\t".join(escape(value) for value in (uuid.uuid4().hex, operation, payload))
+        request_id = uuid.uuid4().hex
+        message = "\t".join(escape(value) for value in (request_id, operation, payload))
         if len(message) > self.MAX_LINE_CHARS:
             raise ValueError("worker request exceeds 8 MiB protocol limit")
         self._process.stdin.write(message + "\n"); self._process.stdin.flush()
@@ -51,7 +52,9 @@ class WorkerClient:
         if not response: raise RuntimeError("worker exited unexpectedly")
         fields = response.rstrip("\n").split("\t", 2)
         if len(fields) != 3: raise RuntimeError("invalid worker response")
-        status, payload = fields[1], fields[2]
+        response_id, status, payload = fields
+        if response_id != request_id:
+            raise RuntimeError(f"worker response correlation mismatch: expected {request_id}, got {response_id}")
         if status == "error": raise RuntimeError(payload)
         return self._unescape(payload)
     def status(self) -> dict[str, str]:
@@ -77,7 +80,11 @@ class WorkerClient:
         try:
             if self._process.poll() is None:
                 self._process.terminate()
-                self._process.wait(timeout=5)
+                try:
+                    self._process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._process.kill()
+                    self._process.wait(timeout=5)
         finally:
             for stream in (self._process.stdin, self._process.stdout, self._process.stderr):
                 if stream is not None and not stream.closed:

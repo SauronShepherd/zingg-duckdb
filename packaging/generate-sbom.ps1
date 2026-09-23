@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $lock = Get-Content -LiteralPath $LockFile -Raw | ConvertFrom-Json
 $root = (Resolve-Path -LiteralPath $LockFile).Path | Split-Path -Parent
 $packages = @(
-  [ordered]@{ name="zingg-duckdb"; version="0.1.0"; license="Apache-2.0" },
+  [ordered]@{ name="zingg-duckdb"; version="0.1.0"; license="AGPL-3.0-only" },
   [ordered]@{ name="duckdb_jdbc"; version=[string]$lock.runtime.duckdbJdbc; license="MIT" },
   [ordered]@{ name="arrow-java"; version=[string]$lock.runtime.arrowJava; license="Apache-2.0" },
   [ordered]@{ name="zingg-compatibility-target"; version=[string]$lock.runtime.zinggCompatibility; license="AGPL-3.0" },
@@ -15,7 +15,7 @@ $moduleLocks = Get-ChildItem -LiteralPath $root -File -Recurse -Filter "dependen
   ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json }
 foreach ($module in $moduleLocks) {
   $packages += [ordered]@{
-    name="module-$([string]$module.module)"; version="0.1.0"; license="Apache-2.0"
+    name="module-$([string]$module.module)"; version="0.1.0"; license="AGPL-3.0-only"
   }
 }
 $document = [ordered]@{

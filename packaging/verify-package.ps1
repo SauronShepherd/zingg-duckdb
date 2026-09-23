@@ -3,7 +3,7 @@ param([Parameter(Mandatory=$true)][string]$Bundle,[switch]$RequireJre,[switch]$R
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $Bundle).Path
 $required = @('SHA256SUMS','sbom.spdx.json','config/runtime-manifest.json','config/compatibility-profile.json','config/compatibility-capsule.json','config/release-policy.json','config/source-provenance.json','worker/runtime-worker-0.1.0-SNAPSHOT.jar','legacy/legacy-blocking-import-zingg07-spark35-0.1.0-SNAPSHOT.jar','legacy/legacy-classifier-import-zingg07-spark35-0.1.0-SNAPSHOT.jar','python/zingg_duckdb/__init__.py','python/zingg_duckdb/client.py','python/zingg_duckdb/worker.py','bin/zingg-duckdb.cmd','bin/zingg-duckdb.ps1','bin/zingg-duckdb.sh','packaging/invoke-legacy-import.ps1','packaging/sign-package.ps1')
-if ($RequireJre) { $required += 'runtime/java/bin/java.exe'; $required += 'runtime/java/JAVA-VERSION.txt' }
+if ($RequireJre) { $javaName = if ($IsWindows) { 'java.exe' } else { 'java' }; $required += "runtime/java/bin/$javaName"; $required += 'runtime/java/JAVA-VERSION.txt' }
 foreach ($relative in $required) { if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) { throw "required bundle file is missing: $relative" } }
 $sumFile = Join-Path $root 'SHA256SUMS'
 foreach ($line in Get-Content -LiteralPath $sumFile) {
