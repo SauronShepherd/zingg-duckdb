@@ -293,5 +293,5 @@ The attached repository audit is authoritative for the next implementation pass.
 
 - [ ] Obtain real Zingg v0.7 blocking/classifier artifacts and Spark differential fixtures.
 - [ ] Confirm the intended integration boundary: standalone repository versus main Zingg `home/duckdb` module.
-- [ ] Execute the full CI matrix on hosted Unix runners after executable-mode repair.
+- [ ] Execute the full CI matrix on hosted Unix runners after executable-mode repair; the workflow now enforces `mvnw` executable mode and uses `setup-java@v5`.
 - [ ] Decide the distribution contract for legacy Spark importers and any external Spark prerequisite.
