@@ -27,4 +27,11 @@ class CompatibilityFunctionsTest {
         PolynomialFeatures.sqlTerms(List.of("a", "b"), 2));
     assertThrows(IllegalArgumentException.class, () -> PolynomialFeatures.expand(new double[0], 2));
   }
+
+  @Test
+  void unsupportedPhasesFailExplicitlyInsteadOfReturningIdentity() {
+    var registry = new PhaseRegistry();
+    assertThrows(io.zingg.duckdb.api.DuckException.class,
+        () -> registry.execute(ZinggJob.Phase.TRAIN, null, null));
+  }
 }
