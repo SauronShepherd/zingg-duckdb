@@ -11,6 +11,7 @@ This report distinguishes executed evidence from implemented-but-unvalidated sco
 | Java unit/contract coverage | `./mvnw.cmd test` | 47 tests passed; 0 failures; 0 errors |
 | Maven lifecycle | `./mvnw.cmd verify` | Full 9-module reactor completed successfully; tests, JAR packaging, and shaded worker packaging passed |
 | Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 5 tests passed |
+| Local Python compatibility matrix | `py -3.10` and `py -3.11` syntax compilation plus unittest discovery | Both interpreters passed all 5 control-plane tests; hosted CI matrix remains required for clean-runner evidence |
 | JDBC lifecycle | Fresh `JdbcLifecycleProbe` against restored DuckDB JDBC 1.5.5.1 target | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed after the 1.4.4.0/1.4.5.0 canary builds |
 | Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
 | Performance | `BenchmarkMain` at sizes 100, 500, 1000, and 2000 | Baselines recorded under `benchmarks/` |
