@@ -271,6 +271,7 @@ The attached repository audit is authoritative for the next implementation pass.
 
 - [ ] Add `adapter-zingg07` compiled against the exact Zingg v0.7 generic contracts while keeping `engine-*` Spark-free.
 - [ ] Produce an executable ZFrame method-coverage report and implement capability-gated methods, including true string-splitting semantics.
+- [x] Give neutral predicate partitioning the explicit `partitionByPredicate` API name while retaining `split(Expression)` as a compatibility alias; the Zingg-shaped string-splitting overload remains distinct.
 - [ ] Replace identity phase executors with explicit supported/unsupported behavior and complete FIND_TRAINING_DATA, labeling, TRAIN, MATCH, and LINK orchestration.
 - [x] Repair ordinary file-ingress metadata and implement deterministic Zingg pair projection with `z_`-prefixed right-side fields.
 - [x] Separate backend-native blocking histograms from strict `zingg07-blocking-tree-v1` model types; validation of a real upstream tree remains an external gate.

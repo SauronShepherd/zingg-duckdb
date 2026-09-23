@@ -88,7 +88,8 @@ final class DuckFrame implements Frame {
   public Frame explode(String list,String output){return q("SELECT zd.* EXCLUDE ("+DuckExpr.quote(list)+"), u.value AS "+DuckExpr.quote(output)+" FROM ("+plan+") zd, UNNEST("+DuckExpr.quote(list)+") u");}
   public Frame sort(String... e){if(e==null||e.length==0)throw new DuckException("sort requires expressions");return q("SELECT * FROM ("+plan+") zd ORDER BY "+String.join(",",Arrays.stream(e).map(SqlSafety::predicate).toList()));}
   public Frame limit(long rows){if(rows<0)throw new DuckException("limit cannot be negative");return q("SELECT * FROM ("+plan+") zd LIMIT "+rows);}
-  public SplitResult split(Expression e){String p=SqlSafety.predicate(e.sql());return new SplitResult(q("SELECT * FROM ("+plan+") zd WHERE "+p),q("SELECT * FROM ("+plan+") zd WHERE NOT ("+p+")"));}
+  public SplitResult partitionByPredicate(Expression e){if(e==null)throw new DuckException("partition predicate is required");String p=SqlSafety.predicate(e.sql());return new SplitResult(q("SELECT * FROM ("+plan+") zd WHERE "+p),q("SELECT * FROM ("+plan+") zd WHERE NOT ("+p+")"));}
+  public SplitResult split(Expression e){return partitionByPredicate(e);}
   public Frame aggregate(String[] groups,String... aggs){if(aggs==null||aggs.length==0)throw new DuckException("aggregates required");String g=groups==null?"":String.join(",",Arrays.stream(groups).map(SqlSafety::predicate).toList());String a=String.join(",",Arrays.stream(aggs).map(SqlSafety::predicate).toList());return q("SELECT "+(g.isBlank()?a:g+", "+a)+" FROM ("+plan+") zd"+(g.isBlank()?"":" GROUP BY "+g));}
   public Frame repartition(int n){if(n<1)throw new DuckException("partitions must be positive");return q("SELECT * FROM ("+plan+") zd");}
   public Frame coalesce(int n){if(n<1)throw new DuckException("partitions must be positive");return q("SELECT * FROM ("+plan+") zd");}
