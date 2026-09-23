@@ -164,3 +164,23 @@ jobs:
       - name: Build and verify release package
         shell: pwsh
         run: ./packaging/package.ps1 -Output dist -CreateJre
+
+  python-matrix:
+    name: Python control-plane (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11']
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run Python syntax and unit tests
+        shell: bash
+        run: |
+          python -m py_compile python/zingg_duckdb/client.py python/zingg_duckdb/worker.py
+          PYTHONPATH=python PYTHONWARNINGS=error python -m unittest discover -s python/tests -v
