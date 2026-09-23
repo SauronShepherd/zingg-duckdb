@@ -14,7 +14,8 @@ final class ConfiguredWorkerServer implements AutoCloseable {
   private final CompatibilityRuntime runtime;
   private final PathPolicy paths;
   private final long maxModelBytes; private final long maxOutputBytes;
-  ConfiguredWorkerServer(CompatibilityRuntime runtime, PathPolicy paths, long maxModelBytes, long maxOutputBytes) { this.runtime=runtime; this.paths=paths; this.maxModelBytes=maxModelBytes; this.maxOutputBytes=maxOutputBytes; }
+  private final boolean unsafeDebugSql;
+  ConfiguredWorkerServer(CompatibilityRuntime runtime, PathPolicy paths, long maxModelBytes, long maxOutputBytes, boolean unsafeDebugSql) { this.runtime=runtime; this.paths=paths; this.maxModelBytes=maxModelBytes; this.maxOutputBytes=maxOutputBytes; this.unsafeDebugSql=unsafeDebugSql; }
 
   void serve(Reader input, Writer output) throws IOException {
     var in=new BufferedReader(input); var out=new PrintWriter(output,true); String line;
@@ -27,8 +28,8 @@ final class ConfiguredWorkerServer implements AutoCloseable {
         switch(message.operation()) {
           case "ping" -> result="pong";
           case "status" -> result=status();
-          case "count" -> { try(var job=runtime.openJob()) { result=Long.toString(job.sql(SqlSafety.readOnlyQuery(message.payload())).count()); } }
-          case "explain" -> { try(var job=runtime.openJob()) { result=job.sql(SqlSafety.readOnlyQuery(message.payload())).explain(); } }
+          case "count" -> { requireUnsafeDebugSql(); try(var job=runtime.openJob()) { result=Long.toString(job.sql(SqlSafety.readOnlyQuery(message.payload())).count()); } }
+          case "explain" -> { requireUnsafeDebugSql(); try(var job=runtime.openJob()) { result=job.sql(SqlSafety.readOnlyQuery(message.payload())).explain(); } }
           case "run" -> result=run(message.payload());
           case "train" -> result=train(message.payload());
           case "shutdown" -> { out.println(ProtocolCodec.encode(new WorkerMessage(requestId,"ok","stopping"))); return; }
@@ -45,8 +46,10 @@ final class ConfiguredWorkerServer implements AutoCloseable {
   private String status() {
     var d=runtime.diagnostics();
     var policy=runtime.connectorPolicy();
-    return "memory_limit="+d.memoryLimit()+";max_temp_directory_size="+d.maxTempDirectorySize()+";temp_directory="+d.tempDirectory()+";threads="+d.threads()+";heap_used_bytes="+d.heapUsedBytes()+";heap_max_bytes="+d.heapMaxBytes()+";process_resident_bytes="+d.processResidentBytes()+";temp_directory_used_bytes="+d.tempDirectoryUsedBytes()+";offline_mode="+policy.offlineMode()+";allowed_extensions="+String.join(",",policy.allowedExtensions());
+    return "memory_limit="+d.memoryLimit()+";max_temp_directory_size="+d.maxTempDirectorySize()+";temp_directory="+d.tempDirectory()+";threads="+d.threads()+";heap_used_bytes="+d.heapUsedBytes()+";heap_max_bytes="+d.heapMaxBytes()+";process_resident_bytes="+d.processResidentBytes()+";temp_directory_used_bytes="+d.tempDirectoryUsedBytes()+";offline_mode="+policy.offlineMode()+";unsafe_debug_sql="+unsafeDebugSql+";allowed_extensions="+String.join(",",policy.allowedExtensions());
   }
+
+  private void requireUnsafeDebugSql(){if(!unsafeDebugSql)throw new IllegalArgumentException("count/explain SQL is disabled; restart with --unsafe-debug-sql for diagnostics only");}
 
   private String run(String payload) {
     String[] p=PayloadCodec.decode(payload, -1);

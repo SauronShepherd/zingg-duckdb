@@ -38,6 +38,7 @@ The latest audit remediation pass added and verified the following changes:
 - Strict-profile Jaccard regression vectors now cover null/empty, case normalization, punctuation normalization, and dissimilar values.
 - Strict-profile Jaro is available and `jaro_winkler` deliberately aliases it to preserve the released v0.7 behavior.
 - Input, output, and spill budgets are now typed separately; spill limits map to DuckDB's temporary-directory setting instead of a generic file-size check.
+- Arbitrary worker diagnostic SQL is disabled by default and requires explicit `--unsafe-debug-sql`; status reports the active mode.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 
