@@ -273,7 +273,7 @@ The attached repository audit is authoritative for the next implementation pass.
 - [ ] Produce an executable ZFrame method-coverage report and implement capability-gated methods, including true string-splitting semantics.
 - [ ] Replace identity phase executors with explicit supported/unsupported behavior and complete FIND_TRAINING_DATA, labeling, TRAIN, MATCH, and LINK orchestration.
 - [x] Repair ordinary file-ingress metadata and implement deterministic Zingg pair projection with `z_`-prefixed right-side fields.
-- [ ] Separate strict `zingg07-blocking-tree-v1` artifacts from backend-native blocking histograms; validate a real upstream tree.
+- [x] Separate backend-native blocking histograms from strict `zingg07-blocking-tree-v1` model types; validation of a real upstream tree remains an external gate.
 - [ ] Implement strict v0.7 similarity vectors and a persisted quirk registry, including Jaccard and released Jaro/Jaro-Winkler behavior.
 - [ ] Validate real v0.7 classifier artifacts, preserve vector ordering, and make imported thresholds authoritative.
 - [x] Remove the unused legacy worker path with arbitrary SQL; the active worker keeps diagnostics behind an explicit unsafe-debug mode.

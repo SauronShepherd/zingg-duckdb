@@ -13,10 +13,10 @@ public final class ModelReader {
     if(maxBytes>0&&bytes.length>maxBytes)throw new DuckException("model exceeds configured size limit");
     Path manifest=dir.resolve("manifest.json"); String json=Files.readString(manifest);
     String profile=field(json,"profile"),type=field(json,"modelType"),hash=field(json,"sha256"),format=field(json,"formatVersion"),version=field(json,"zinggVersion");
-    if(!PROFILES.contains(profile))throw new DuckException("unsupported model profile: "+profile);
-    if(!Set.of("BLOCKING_TREE","CLASSIFIER").contains(type))throw new DuckException("unsupported model type: "+type);
+    if(!PROFILES.contains(profile)&&!"duckdb-native-0.1".equals(profile))throw new DuckException("unsupported model profile: "+profile);
+    if(!Set.of("BLOCKING_TREE","BACKEND_BLOCKING_HISTOGRAM","CLASSIFIER").contains(type))throw new DuckException("unsupported model type: "+type);
     ModelFormat.requireSupported(format);
-    if(!"0.7.0".equals(version))throw new DuckException("unsupported Zingg version: "+version);
+    if(!"0.7.0".equals(version)&&!"0.1.0".equals(version))throw new DuckException("unsupported model version: "+version);
     if(hash.isBlank()||!hash.equalsIgnoreCase(NativeModelStore.sha256(bytes)))throw new DuckException("model checksum mismatch");
     Path provenance=dir.resolve("provenance.json");if(!Files.isRegularFile(provenance))throw new DuckException("model provenance is missing");String provenanceJson=Files.readString(provenance);String provenanceHash=field(provenanceJson,"sha256");if(!hash.equalsIgnoreCase(provenanceHash))throw new DuckException("provenance checksum mismatch");if(field(provenanceJson,"sourcePath").isBlank()||field(provenanceJson,"importerVersion").isBlank())throw new DuckException("model provenance is incomplete");
     if (format.equals("zingg-0.1-native")) validateNativePayload(type, bytes);
@@ -25,7 +25,7 @@ public final class ModelReader {
   private static void validateNativePayload(String type, byte[] bytes) {
     String payload = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
     if (payload.indexOf('\ufffd') >= 0) throw new DuckException("native model payload is not valid UTF-8");
-    String expected = ModelType.CLASSIFIER.name().equals(type) ? "\"kind\":\"linear-classifier\"" : "\"kind\":\"native-blocking-tree\"";
+    String expected = ModelType.CLASSIFIER.name().equals(type) ? "\"kind\":\"linear-classifier\"" : ModelType.BACKEND_BLOCKING_HISTOGRAM.name().equals(type) ? "\"kind\":\"duckdb-blocking-histogram\"" : "\"kind\":\"native-blocking-tree\"";
     if (!payload.contains(expected)) throw new DuckException("native model payload does not match manifest type: " + type);
   }
   private static String field(String json,String name){Matcher m=Pattern.compile("\\\""+Pattern.quote(name)+"\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"").matcher(json);if(!m.find())return "";return m.group(1).replace("\\\\\"","\"").replace("\\\\\\\\","\\\\");}

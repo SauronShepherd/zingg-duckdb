@@ -34,7 +34,7 @@ public final class NativeTrainingService {
     String frequencyJson = frequencies.entrySet().stream()
         .map(e -> "{\"key\":\"" + esc(e.getKey()) + "\",\"count\":" + e.getValue() + "}")
         .collect(java.util.stream.Collectors.joining(","));
-    String payload = "{\"kind\":\"native-blocking-tree\",\"profile\":\"" + esc(config.profile())
+    String payload = "{\"kind\":\"duckdb-blocking-histogram\",\"profile\":\"" + esc(config.profile())
         + "\",\"blockingExpression\":\"" + esc(config.blockingExpression())
         + "\",\"blockingColumn\":\"" + esc(config.blockingColumn())
         + "\",\"features\":[" + config.features().stream().map(f -> "\"" + esc(f) + "\"").collect(java.util.stream.Collectors.joining(","))
@@ -43,7 +43,7 @@ public final class NativeTrainingService {
     try {
       Path root = config.artifactDirectory().toAbsolutePath().normalize();
       Files.createDirectories(root);
-      var manifest = new ModelManifest(config.profile(), "0.7.0", "zingg-0.1-native", ModelType.BLOCKING_TREE.name(), config.features(), "");
+      var manifest = new ModelManifest("duckdb-native-0.1", "0.1.0", "zingg-0.1-native", ModelType.BACKEND_BLOCKING_HISTOGRAM.name(), config.features(), "");
       var provenance = new ImportProvenance(root.toString(), "0.7.0", importerVersion, Instant.now(), "");
       new ModelArtifactWriter(root).write(manifest, payload.getBytes(StandardCharsets.UTF_8), provenance);
       return new Result(root, rows, prepared.columns());

@@ -60,4 +60,14 @@ class ModelFormatTest {
     assertThrows(DuckException.class, () -> ModelReader.load(artifact, 1024));
     assertThrows(DuckException.class, () -> ModelReader.load(artifact, 1));
   }
+
+  @Test
+  void backendBlockingHistogramIsDistinctFromStrictZinggTree(@TempDir Path temp) throws Exception {
+    byte[] payload = "{\"kind\":\"duckdb-blocking-histogram\",\"blockingFrequencies\":[]}".getBytes(StandardCharsets.UTF_8);
+    var manifest = new ModelManifest("duckdb-native-0.1", "0.1.0", ModelFormat.CURRENT,
+        "BACKEND_BLOCKING_HISTOGRAM", List.of("block"), "");
+    var artifact = new ModelArtifactWriter(temp.resolve("histogram")).write(manifest, payload,
+        new ImportProvenance("fixture/histogram", "0.1.0", "native-trainer", Instant.now(), ""));
+    assertEquals("BACKEND_BLOCKING_HISTOGRAM", ModelReader.load(artifact, 1024).manifest().modelType());
+  }
 }
