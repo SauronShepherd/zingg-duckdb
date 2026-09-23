@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from zingg_duckdb.client import WorkerClient
 
@@ -28,6 +29,24 @@ class WorkerClientHelpersTest(unittest.TestCase):
         parts = encoded.split(".")
         values = [base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)).decode("utf-8") for part in parts[2:]]
         self.assertEqual(["/tmp/a|b;part.csv", "a || b", "C:\\data\\x.y"], values)
+
+    def test_collect_budget_is_forwarded_to_worker(self):
+        class FakePipe:
+            def close(self): pass
+        class FakeProcess:
+            stdin = FakePipe()
+            stdout = FakePipe()
+            stderr = FakePipe()
+            def poll(self): return 0
+        with patch("zingg_duckdb.client.subprocess.Popen", return_value=FakeProcess()) as popen:
+            WorkerClient(command=["worker"], max_collect_bytes=123)
+            self.assertEqual(["worker"], popen.call_args.args[0])
+
+        # The option is part of the default-launch path; verify it without starting a process.
+        with patch("zingg_duckdb.client.subprocess.Popen", return_value=FakeProcess()) as popen:
+            WorkerClient(max_collect_bytes=123)
+            self.assertIn("--max-collect-bytes", popen.call_args.args[0])
+            self.assertIn("123", popen.call_args.args[0])
 
 
 if __name__ == "__main__":
