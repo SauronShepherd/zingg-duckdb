@@ -22,7 +22,7 @@ public final class Main {
     if(maxModel<0||maxTemp<0||maxOutput<0||maxCollect<0||maxSpill<0)throw new IllegalArgumentException("resource limits cannot be negative");
     long effectiveTemp=maxTemp>0?maxTemp:maxSpill;
     try(var runtime=new CompatibilityRuntime(new RuntimeConfig(url,threads,memory,null,jobs,effectiveTemp,offline,extensions),null,"zingg-0.7.0-duckdb-1.5.5.1",new ResourceBudget(memory,maxRows,0,maxOutput,maxCollect,maxSpill));
-        var server=new ConfiguredWorkerServer(runtime,new io.zingg.duckdb.api.PathPolicy(inputRoot,outputRoot),maxModel,maxOutput,unsafeDebugSql))
+        var server=new ConfiguredWorkerServer(runtime,new io.zingg.duckdb.api.PathPolicy(inputRoot,outputRoot),maxModel,maxOutput,maxRows,maxCollect,maxSpill,unsafeDebugSql))
       {server.serve(new java.io.InputStreamReader(System.in),new java.io.OutputStreamWriter(System.out));}
   }
 }

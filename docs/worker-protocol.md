@@ -34,10 +34,10 @@ java -jar runtime-worker.jar \
 
 The worker emits structured tab-separated responses and keeps diagnostics out of stdout. SQL predicates are allowlisted by `SqlSafety`; input and output paths are constrained by `PathPolicy` when roots are configured.
 
-The Python facade accepts the same runtime options (`input_root`, `output_root`, `threads`, `memory_bytes`, `max_temp_bytes`, `max_jobs`, `max_rows`, `max_spill_bytes`, and `max_model_bytes`) and translates them to the worker flags. `max_temp_bytes` is applied by DuckDB as `max_temp_directory_size`.
+The Python facade accepts the same runtime options (`input_root`, `output_root`, `threads`, `memory_bytes`, `max_temp_bytes`, `max_jobs`, `max_rows`, `max_spill_bytes`, `max_collect_bytes`, and `max_model_bytes`) and translates them to the worker flags. `max_temp_bytes` is applied by DuckDB as `max_temp_directory_size`.
 
 The corresponding Python methods are `DuckWorker.train(...)` for a blocking tree and `DuckWorker.train_classifier(...)` for a native logistic classifier. Classifier training is deterministic for a fixed input order and configuration, uses bounded batch gradient descent with L2 regularization, and writes the neutral `zingg-0.1-native` classifier artifact.
 
-The read-only `status` operation returns the effective DuckDB settings (`memory_limit`, `max_temp_directory_size`, `temp_directory`, and `threads`) plus JVM heap counters. These diagnostics complement, but do not replace, independent process/RSS measurement. It is available as `DuckWorker.status()` and `WorkerClient.status()` in Python.
+The read-only `status` operation returns the effective DuckDB settings (`memory_limit`, `max_temp_directory_size`, `temp_directory`, and `threads`), configured row/collect/output/spill budgets, and JVM heap counters. These diagnostics complement, but do not replace, independent process/RSS measurement. It is available as `DuckWorker.status()` and `WorkerClient.status()` in Python.
 
 The read-only `explain <sql>` operation validates the query with the same read-only SQL policy as `count` and returns DuckDB's plan without executing the query. It is available as `DuckWorker.explain(sql)` and `WorkerClient.explain(sql)`.

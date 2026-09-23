@@ -44,6 +44,7 @@ The latest audit remediation pass added and verified the following changes:
 - `FrameCapabilityCoverageTest` now provides an executable structural coverage guard for the complete `Frame` API, and the capability matrix documents semantic parity gaps.
 - Graph entity scoring now uses a pair-score index instead of rescanning all edges for every component pair; a 301-node chain regression passes.
 - Collection now has an independent typed byte budget (`--max-collect-bytes`); targeted row-collection and budget tests pass.
+- Worker `status` now reports the effective row, collect, output, and spill budgets; a shaded-JAR smoke test confirmed values `10/20/30/40` and clean shutdown.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 

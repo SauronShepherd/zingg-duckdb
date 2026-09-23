@@ -13,9 +13,9 @@ import java.util.List;
 final class ConfiguredWorkerServer implements AutoCloseable {
   private final CompatibilityRuntime runtime;
   private final PathPolicy paths;
-  private final long maxModelBytes; private final long maxOutputBytes;
+  private final long maxModelBytes; private final long maxOutputBytes; private final long maxRows; private final long maxCollectBytes; private final long maxSpillBytes;
   private final boolean unsafeDebugSql;
-  ConfiguredWorkerServer(CompatibilityRuntime runtime, PathPolicy paths, long maxModelBytes, long maxOutputBytes, boolean unsafeDebugSql) { this.runtime=runtime; this.paths=paths; this.maxModelBytes=maxModelBytes; this.maxOutputBytes=maxOutputBytes; this.unsafeDebugSql=unsafeDebugSql; }
+  ConfiguredWorkerServer(CompatibilityRuntime runtime, PathPolicy paths, long maxModelBytes, long maxOutputBytes, long maxRows, long maxCollectBytes, long maxSpillBytes, boolean unsafeDebugSql) { this.runtime=runtime; this.paths=paths; this.maxModelBytes=maxModelBytes; this.maxOutputBytes=maxOutputBytes; this.maxRows=maxRows; this.maxCollectBytes=maxCollectBytes; this.maxSpillBytes=maxSpillBytes; this.unsafeDebugSql=unsafeDebugSql; }
 
   void serve(Reader input, Writer output) throws IOException {
     var in=new BufferedReader(input); var out=new PrintWriter(output,true); String line;
@@ -46,7 +46,7 @@ final class ConfiguredWorkerServer implements AutoCloseable {
   private String status() {
     var d=runtime.diagnostics();
     var policy=runtime.connectorPolicy();
-    return "memory_limit="+d.memoryLimit()+";max_temp_directory_size="+d.maxTempDirectorySize()+";temp_directory="+d.tempDirectory()+";threads="+d.threads()+";heap_used_bytes="+d.heapUsedBytes()+";heap_max_bytes="+d.heapMaxBytes()+";process_resident_bytes="+d.processResidentBytes()+";temp_directory_used_bytes="+d.tempDirectoryUsedBytes()+";offline_mode="+policy.offlineMode()+";unsafe_debug_sql="+unsafeDebugSql+";allowed_extensions="+String.join(",",policy.allowedExtensions());
+    return "memory_limit="+d.memoryLimit()+";max_temp_directory_size="+d.maxTempDirectorySize()+";temp_directory="+d.tempDirectory()+";threads="+d.threads()+";max_rows="+maxRows+";max_collect_bytes="+maxCollectBytes+";max_output_bytes="+maxOutputBytes+";max_spill_bytes="+maxSpillBytes+";heap_used_bytes="+d.heapUsedBytes()+";heap_max_bytes="+d.heapMaxBytes()+";process_resident_bytes="+d.processResidentBytes()+";temp_directory_used_bytes="+d.tempDirectoryUsedBytes()+";offline_mode="+policy.offlineMode()+";unsafe_debug_sql="+unsafeDebugSql+";allowed_extensions="+String.join(",",policy.allowedExtensions());
   }
 
   private void requireUnsafeDebugSql(){if(!unsafeDebugSql)throw new IllegalArgumentException("count/explain SQL is disabled; restart with --unsafe-debug-sql for diagnostics only");}
