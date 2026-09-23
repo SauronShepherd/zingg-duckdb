@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
+import java.nio.charset.StandardCharsets;
+import io.zingg.duckdb.model.ModelFormat;
+import io.zingg.duckdb.model.ModelManifest;
+import io.zingg.duckdb.model.ModelReader;
 import org.junit.jupiter.api.Test;
 
 class CompatibilityFunctionsTest {
@@ -33,5 +37,15 @@ class CompatibilityFunctionsTest {
     var registry = new PhaseRegistry();
     assertThrows(io.zingg.duckdb.api.DuckException.class,
         () -> registry.execute(ZinggJob.Phase.TRAIN, null, null));
+  }
+
+  @Test
+  void malformedOptionalClassifierNumbersAreRejectedInsteadOfDefaulted() {
+    assertThrows(io.zingg.duckdb.api.DuckException.class,
+        () -> new ModelScorerRegistry().create(new ModelReader.LoadedModel(
+            new ModelManifest("zingg-0.7.0", "0.7.0", ModelFormat.CURRENT,
+                "CLASSIFIER", List.of("score"), "ignored"),
+            "{\"kind\":\"linear-classifier\",\"features\":[\"score\"],\"weights\":[1],\"threshold\":\"bad\"}"
+                .getBytes(StandardCharsets.UTF_8))));
   }
 }
