@@ -45,6 +45,7 @@ The latest audit remediation pass added and verified the following changes:
 - Graph entity scoring now uses a pair-score index instead of rescanning all edges for every component pair; a 301-node chain regression passes.
 - Collection now has an independent typed byte budget (`--max-collect-bytes`); targeted row-collection and budget tests pass.
 - Worker `status` now reports the effective row, collect, output, and spill budgets; a shaded-JAR smoke test confirmed values `10/20/30/40` and clean shutdown.
+- The build plan now distinguishes locally proven model envelope/checksum/version rejection, deterministic pair projection/file-ingress metadata, and structured worker payloads from their still-pending real-Zingg differential gates.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 

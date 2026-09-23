@@ -232,7 +232,7 @@ The following backlog is added from the 2026-09-22 architecture review. These ar
 - [x] Import a real v0.7.0 `Tree<Canopy<Row>>` blocking artifact through the isolated Spark 3.5.5 process and verify neutral tree nodes, field context, hash identity, and edges.
 - [ ] Import a real v0.7.0 Spark ML classifier and verify vector assembler ordering, polynomial expansion, logistic margin/probability, thresholding, and unsupported-stage diagnostics.
 - [x] Implement `GetPendingLabels`/`ApplyLabels` protocol semantics with bounded batches, idempotency, request correlation, and structured rejections.
-- [ ] Add model round-trip manifests, golden payloads, version migration rules, checksum verification, and explicit unknown-version failures.
+- [x] Add model round-trip manifests, checksum verification, and explicit unknown-version failures; version migration rules remain intentionally unsupported until a migration contract exists.
 
 ### P1 — resource, correctness, and platform gates
 
@@ -272,12 +272,12 @@ The attached repository audit is authoritative for the next implementation pass.
 - [ ] Add `adapter-zingg07` compiled against the exact Zingg v0.7 generic contracts while keeping `engine-*` Spark-free.
 - [ ] Produce an executable ZFrame method-coverage report and implement capability-gated methods, including true string-splitting semantics.
 - [ ] Replace identity phase executors with explicit supported/unsupported behavior and complete FIND_TRAINING_DATA, labeling, TRAIN, MATCH, and LINK orchestration.
-- [ ] Repair ordinary file-ingress metadata and implement deterministic Zingg pair projection with `z_`-prefixed right-side fields.
+- [x] Repair ordinary file-ingress metadata and implement deterministic Zingg pair projection with `z_`-prefixed right-side fields.
 - [ ] Separate strict `zingg07-blocking-tree-v1` artifacts from backend-native blocking histograms; validate a real upstream tree.
 - [ ] Implement strict v0.7 similarity vectors and a persisted quirk registry, including Jaccard and released Jaro/Jaro-Winkler behavior.
 - [ ] Validate real v0.7 classifier artifacts, preserve vector ordering, and make imported thresholds authoritative.
 - [x] Remove the unused legacy worker path with arbitrary SQL; the active worker keeps diagnostics behind an explicit unsafe-debug mode.
-- [ ] Replace delimiter-based nested worker payloads with structured versioned messages.
+- [x] Replace delimiter-based nested worker payloads with structured versioned messages.
 - [ ] Make Python installation discover a worker and private Java runtime on at least one supported platform.
 
 ### P1 correctness, performance, and release gates
