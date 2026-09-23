@@ -221,7 +221,7 @@ The following backlog is added from the 2026-09-22 architecture review. These ar
 ### P0 — architecture proof and first workflow
 
 - [x] Implement `RelationScope` and a `DuckRelationHandle`; reject cross-connection use of `CONNECTION_LOCAL` handles.
-- [ ] Add owner-connection, duplicate-connection, TEMP, run-schema, UDF, Arrow-registration, cancellation, timeout, and cleanup probes against DuckDB JDBC 1.5.5.1.
+- [x] Add owner-connection, duplicate-connection, TEMP, run-schema, UDF, Arrow-registration, cancellation, timeout, and cleanup probes against DuckDB JDBC 1.5.5.1; the recorded lifecycle probe completed successfully on the pinned JDBC runtime.
 - [x] Replace TEMP-only reusable cache semantics with run-private ordinary tables/views where reuse can cross a connection.
 - [x] Build the exact v0.7 compatibility capsule outside the upstream reactor; emit source hashes, notices, patches, and dependency provenance.
 - [x] Add a pure-engine dependency gate that inspects resolved and shaded runtime contents for Spark/GraphFrames/Scala/`zingg.*` leakage.
