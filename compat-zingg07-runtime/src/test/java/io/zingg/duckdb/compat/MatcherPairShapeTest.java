@@ -22,4 +22,18 @@ class MatcherPairShapeTest {
       assertTrue(candidates.collect().get(0).values().contains(2));
     }
   }
+
+  @Test
+  void classifierUsesImportedThresholdAndEmitsPrediction(@TempDir Path temp) {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("classifier.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config); var job = runtime.openJob()) {
+      var candidates = job.sql("select 1 as feature");
+      var classifier = new LinearClassifier(List.of("feature"), new double[] {1.0}, 0.0, true, 0.9);
+      var scored = new Matcher().scoreLinear(candidates,
+          new Matcher.MatchConfig("feature", "feature", "TRUE", 0.1), classifier);
+      assertEquals(List.of("feature", "z_score", "z_prediction"), scored.columns());
+      assertEquals(0, scored.count());
+    }
+  }
 }

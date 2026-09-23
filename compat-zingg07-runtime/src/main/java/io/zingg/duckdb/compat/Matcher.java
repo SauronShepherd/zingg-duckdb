@@ -25,8 +25,11 @@ public final class Matcher {
     if(expanded.size()!=weights.length)throw new DuckException("classifier expanded feature dimensions differ");
     for(int i=0;i<weights.length;i++)terms.add("("+weights[i]+" * "+expanded.get(i)+")");
     String z=classifier.intercept()+(terms.isEmpty()?"":" + "+String.join(" + ",terms));
-    String expression=classifier.logistic()?"(1.0 / (1.0 + exp(-("+z+")))":"("+z+")";
-    return candidates.withColumn("z_score",new io.zingg.duckdb.engine.DuckExpr(expression)).filter(new io.zingg.duckdb.engine.DuckExpr("z_score >= "+config.threshold()));
+    String expression=classifier.logistic()?"(1.0 / (1.0 + exp(-("+z+"))))":"("+z+")";
+    double threshold=classifier.threshold();
+    var scored=candidates.withColumn("z_score",new io.zingg.duckdb.engine.DuckExpr(expression));
+    return scored.withColumn("z_prediction",new io.zingg.duckdb.engine.DuckExpr("CASE WHEN z_score >= "+threshold+" THEN 1 ELSE 0 END"))
+        .filter(new io.zingg.duckdb.engine.DuckExpr("z_prediction = 1"));
   }
   private static String quote(String value){return "\""+value.replace("\"","\"\"")+"\"";}
 }
