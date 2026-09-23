@@ -276,7 +276,7 @@ The attached repository audit is authoritative for the next implementation pass.
 - [ ] Separate strict `zingg07-blocking-tree-v1` artifacts from backend-native blocking histograms; validate a real upstream tree.
 - [ ] Implement strict v0.7 similarity vectors and a persisted quirk registry, including Jaccard and released Jaro/Jaro-Winkler behavior.
 - [ ] Validate real v0.7 classifier artifacts, preserve vector ordering, and make imported thresholds authoritative.
-- [ ] Remove arbitrary SQL from the default worker API or isolate it behind an explicit unsafe-debug mode.
+- [x] Remove the unused legacy worker path with arbitrary SQL; the active worker keeps diagnostics behind an explicit unsafe-debug mode.
 - [ ] Replace delimiter-based nested worker payloads with structured versioned messages.
 - [ ] Make Python installation discover a worker and private Java runtime on at least one supported platform.
 

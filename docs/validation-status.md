@@ -39,6 +39,7 @@ The latest audit remediation pass added and verified the following changes:
 - Strict-profile Jaro is available and `jaro_winkler` deliberately aliases it to preserve the released v0.7 behavior.
 - Input, output, and spill budgets are now typed separately; spill limits map to DuckDB's temporary-directory setting instead of a generic file-size check.
 - Arbitrary worker diagnostic SQL is disabled by default and requires explicit `--unsafe-debug-sql`; status reports the active mode.
+- The obsolete `WorkerServer` implementation, which bypassed the active diagnostic-SQL gate and used delimiter payloads, was removed; the complete Maven suite passed after removal.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 
