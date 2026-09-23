@@ -1,0 +1,6 @@
+[
+  {"name":"io.zingg.duckdb.worker.Main","allDeclaredConstructors":true,"allDeclaredMethods":true},
+  {"name":"io.zingg.duckdb.worker.ConfiguredWorkerServer","allDeclaredConstructors":true,"allDeclaredMethods":true},
+  {"name":"org.duckdb.DuckDBDriver","allDeclaredConstructors":true},
+  {"name":"org.duckdb.DuckDBConnection","allDeclaredMethods":true}
+]

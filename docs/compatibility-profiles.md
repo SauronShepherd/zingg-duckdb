@@ -1,0 +1,3 @@
+# Compatibility profiles
+
+ Profiles are immutable runtime contracts. The initial profile pins Zingg `0.7.0`, DuckDB JDBC `1.5.5.1`, and Spark reference `3.5.5`, and records released semantics for timestamp-prefixed IDs, zero-scored transitive graph pairs, signed Java blocking hashes, and the registered similarities `exact`, `jaccard`, and `normalized_levenshtein`. Classifier compatibility uses Spark's degree-3 polynomial expansion ordering: all monomials of degree 1, then degree 2, then degree 3, with nondecreasing input-column indexes within each monomial. A semantic change requires a new profile ID rather than mutating an existing one.

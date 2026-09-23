@@ -1,0 +1,15 @@
+{
+  "id": "zingg-0.7.0-duckdb-1.5.5.1",
+  "zinggVersion": "0.7.0",
+  "duckdbJdbc": "1.5.5.1",
+  "sparkReference": "3.5.5",
+  "rules": {
+    "clusterIds": "epoch-millis-prefixed",
+    "transitiveImpliedScore": 0.0,
+    "blockingHash": "java-string-hashcode-signed-int",
+    "similarities": ["exact", "jaccard", "normalized_levenshtein"],
+    "trainingUnion": "positional",
+    "matchUnion": "by-name-allow-missing-columns"
+  },
+  "nativeModelFormat": "zingg-0.1-native"
+}

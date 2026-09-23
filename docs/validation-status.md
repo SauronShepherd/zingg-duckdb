@@ -1,0 +1,35 @@
+# Validation status
+
+Last updated: 2026-09-23
+
+This report distinguishes executed evidence from implemented-but-unvalidated scope.
+
+## Executed evidence
+
+| Area | Evidence | Result |
+|---|---|---|
+| Java unit/contract coverage | `./mvnw.cmd test` | 23 tests passed; 0 failures; 0 errors |
+| Python control plane | `python -m unittest discover -s python/tests -v` with warnings as errors | 3 tests passed |
+| JDBC lifecycle | `JdbcLifecycleProbe` against DuckDB JDBC 1.5.5.1 | Owner/TEMP/run-schema/UDF/cancellation/timeout/cleanup report completed |
+| Worker protocol | Shaded worker `ping`, `status`, `count`, unsafe SQL, and `shutdown` requests | Correlation, read-only enforcement, diagnostics, and shutdown passed |
+| Performance | `BenchmarkMain` at sizes 100, 500, 1000, and 2000 | Baselines recorded under `benchmarks/` |
+| Package integrity | `packaging/package.ps1 -Output dist -CreateJre` | Build, dependency purity, locks, source archive, and package verification passed |
+| Source quality | `git diff --check`, Python syntax compilation | Passed |
+| DuckDB canary resolution | Published Maven Central lanes 1.4.5.0 and 1.4.4.0 selected; 1.5.6 and 2.0.0 were rejected as unavailable coordinates | Both versions completed full reactor package builds and passed the JDBC lifecycle probe; pinned 1.5.5.1 build restored |
+| Bundled-Java launch | Packaged `runtime/java/bin/java.exe -jar worker/runtime-worker-0.1.0-SNAPSHOT.jar` | `ping`, `status`, and `shutdown` passed without using the system Java executable |
+| Worker negative paths | Packaged worker malformed-operation and >8 MiB input followed by valid requests | Structured errors emitted; worker recovered and completed `ping`/`shutdown` |
+
+## Implemented, but still requiring dedicated validation
+
+- Real Zingg v0.7 blocking and classifier artifact import and differential scoring.
+- Full Arrow ingress/egress lifecycle and issue-specific compatibility gates.
+- Complete relational-operation differential matrix against Spark reference behavior.
+- Persisted `findTrainingData -> applyLabels -> trainMatch -> restart -> match` workflow.
+- Forced spill, low-resource, cancellation-at-every-phase, process-kill, and orphan-cleanup scenarios.
+- Clean-install matrix on Linux, macOS, and Windows with no system Java.
+- GraalVM Native Image comparison.
+- DuckDB next-patch and 2.0 compatibility lanes.
+- Full SBOM/license/security scan and signed-release verification.
+- CI execution across all configured platform and Python matrix jobs.
+
+Passing unit tests and package checks do not close these items; each requires its own executable evidence.

@@ -1,0 +1,158 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  compile:
+    name: Compile (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-13, macos-14, windows-2025]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Compile without tests
+        shell: bash
+        run: ./mvnw -DskipTests clean package
+
+  windows-package:
+    name: Assemble Windows distribution
+    runs-on: windows-2025
+    needs: compile
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build and verify package without tests
+        shell: pwsh
+        run: ./packaging/package.ps1 -Output dist -CreateJre
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zingg-duckdb-windows
+          path: |
+            dist/zingg-duckdb-0.1.0
+            dist/zingg-duckdb-source.zip
+          if-no-files-found: error
+
+  offline-packages:
+    name: Offline package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    needs: compile
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-amd64, os: ubuntu-24.04, shell: bash }
+          - { target: linux-arm64, os: ubuntu-24.04-arm, shell: bash }
+          - { target: macos-x86_64, os: macos-13, shell: bash }
+          - { target: macos-arm64, os: macos-14, shell: bash }
+          - { target: windows-x86_64, os: windows-2025, shell: pwsh }
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build offline package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ./mvnw -DskipTests package
+          pwsh ./packaging/package.ps1 -Output dist -CreateJre
+          test -f "dist/zingg-duckdb-0.1.0/runtime-manifest.json"
+          test -f "dist/zingg-duckdb-source.zip"
+      - name: Build offline package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./mvnw.cmd -DskipTests package
+          ./packaging/package.ps1 -Output dist -CreateJre
+          if (!(Test-Path "dist/zingg-duckdb-0.1.0/runtime-manifest.json")) { throw "runtime manifest missing" }
+          if (!(Test-Path "dist/zingg-duckdb-source.zip")) { throw "source archive missing" }
+      - name: Upload offline package
+        uses: actions/upload-artifact@v4
+        with:
+          name: zingg-duckdb-${{ matrix.target }}
+          path: |
+            dist/zingg-duckdb-0.1.0
+            dist/zingg-duckdb-source.zip
+          if-no-files-found: error
+
+  duckdb-canary:
+    name: DuckDB compatibility (${{ matrix.lane }})
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.nonBlocking }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { lane: pinned-1.5.5.1, version: '1.5.5.1', nonBlocking: false }
+          - { lane: published-1.4.5.0, version: '1.4.5.0', nonBlocking: true }
+          - { lane: published-1.4.4.0, version: '1.4.4.0', nonBlocking: true }
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Compile compatibility lane without tests
+        run: ./mvnw -DskipTests -Dduckdb.version=${{ matrix.version }} package
+      - name: Publish canary result
+        if: always()
+        run: echo "DuckDB lane ${{ matrix.lane }} completed; nonBlocking=${{ matrix.nonBlocking }}"
+
+  validation:
+    name: Java, Python, runtime, and benchmark validation
+    runs-on: ubuntu-24.04
+    needs: compile
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run Java tests
+        run: ./mvnw test
+      - name: Run Python tests and syntax checks
+        shell: bash
+        run: |
+          python3 -m py_compile python/zingg_duckdb/client.py python/zingg_duckdb/worker.py
+          PYTHONPATH=python PYTHONWARNINGS=error python3 -m unittest discover -s python/tests -v
+      - name: Run JDBC lifecycle probe
+        shell: bash
+        run: |
+          java -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.5.1/duckdb_jdbc-1.5.5.1.jar" \
+            io.zingg.duckdb.engine.JdbcLifecycleProbe
+      - name: Run benchmark smoke
+        shell: bash
+        run: |
+          java -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.5.1/duckdb_jdbc-1.5.5.1.jar" \
+            io.zingg.duckdb.engine.BenchmarkMain --size 1000 --repetitions 3
+      - name: Build and verify release package
+        shell: pwsh
+        run: ./packaging/package.ps1 -Output dist -CreateJre

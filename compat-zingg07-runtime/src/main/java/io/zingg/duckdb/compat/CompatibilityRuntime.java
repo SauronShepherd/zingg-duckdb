@@ -1,0 +1,11 @@
+package io.zingg.duckdb.compat;
+import io.zingg.duckdb.api.*; import io.zingg.duckdb.engine.*;
+public final class CompatibilityRuntime implements AutoCloseable {
+  private final DuckRuntime runtime; private final ConnectorPolicy connectorPolicy; private final CompatibilityClock clock; private final ProfileRegistry profiles; private final CompatibilityProfile profile; private final PhaseRegistry phases; private final HashRegistry hashes; private final SimilarityRegistry similarities; private final ResourceBudget budget; private final LabelDecisionProvider labels;
+  public CompatibilityRuntime(String url,CompatibilityClock clock){this(new RuntimeConfig(url,Runtime.getRuntime().availableProcessors(),0,null,1),clock,"zingg-0.7.0-duckdb-1.5.5.1",ResourceBudget.unlimited());}
+  public CompatibilityRuntime(RuntimeConfig config,CompatibilityClock clock){this(config,clock,"zingg-0.7.0-duckdb-1.5.5.1",ResourceBudget.unlimited());}
+  public CompatibilityRuntime(RuntimeConfig config,CompatibilityClock clock,String profileId){this(config,clock,profileId,ResourceBudget.unlimited());}
+ public CompatibilityRuntime(RuntimeConfig config,CompatibilityClock clock,String profileId,ResourceBudget budget){connectorPolicy=config.connectorPolicy();runtime=new DuckRuntime(config);this.clock=clock==null?CompatibilityClock.system():clock;profiles=new ProfileRegistry();profile=profiles.require(profileId);phases=new PhaseRegistry();hashes=new HashRegistry();similarities=new SimilarityRegistry();this.budget=budget==null?ResourceBudget.unlimited():budget;labels=new InMemoryLabelDecisionProvider();}
+ public JobHandle openJob(){return runtime.openJob(budget);} public CompatibilityClock clock(){return clock;} public CompatibilityProfile profile(){return profile;} public ProfileRegistry profiles(){return profiles;} public PhaseRegistry phases(){return phases;} public HashRegistry hashes(){return hashes;} public SimilarityRegistry similarities(){return similarities;} public ResourceBudget budget(){return budget;} public LabelDecisionProvider labels(){return labels;} public void registerPhaseExecutor(ZinggJob.Phase phase,PhaseExecutor executor){phases.register(phase,executor);} public void close(){runtime.close();}
+ public RuntimeDiagnostics diagnostics(){return runtime.diagnostics();} public ConnectorPolicy connectorPolicy(){return connectorPolicy;}
+}

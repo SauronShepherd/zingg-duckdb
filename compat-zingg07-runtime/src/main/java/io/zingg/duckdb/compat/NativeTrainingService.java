@@ -1,0 +1,73 @@
+package io.zingg.duckdb.compat;
+
+import io.zingg.duckdb.api.DuckException;
+import io.zingg.duckdb.api.Frame;
+import io.zingg.duckdb.model.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.TreeMap;
+
+/** Produces a neutral, Spark-free native TRAIN artifact. */
+public final class NativeTrainingService {
+  private final String importerVersion;
+  public NativeTrainingService() { this("zingg-duckdb-native-0.1"); }
+  public NativeTrainingService(String importerVersion) {
+    if (importerVersion == null || importerVersion.isBlank()) throw new IllegalArgumentException("importerVersion is required");
+    this.importerVersion = importerVersion;
+  }
+  public Result train(Frame input, NativeTrainingConfig config) {
+    if (input == null || config == null) throw new IllegalArgumentException("training input and config are required");
+    Frame prepared = new TrainingPlan().prepare(input, new TrainingPlan.Config(config.blockingExpression(), config.blockingColumn(), config.maxRows()));
+    long rows = prepared.count();
+    // TreeMap makes the serialized tree independent of input partition/order.
+    var frequencies = new TreeMap<String,Long>();
+    int blockingIndex = prepared.columns().indexOf(config.blockingColumn());
+    if (blockingIndex < 0) throw new DuckException("training blocking column is not present: " + config.blockingColumn());
+    for (var row : prepared.collect()) {
+      Object value = row.values().get(blockingIndex);
+      String key = value == null ? "__NULL__" : String.valueOf(value);
+      frequencies.merge(key, 1L, Long::sum);
+    }
+    long maxBucketSize = frequencies.values().stream().mapToLong(Long::longValue).max().orElse(0L);
+    String frequencyJson = frequencies.entrySet().stream()
+        .map(e -> "{\"key\":\"" + esc(e.getKey()) + "\",\"count\":" + e.getValue() + "}")
+        .collect(java.util.stream.Collectors.joining(","));
+    String payload = "{\"kind\":\"native-blocking-tree\",\"profile\":\"" + esc(config.profile())
+        + "\",\"blockingExpression\":\"" + esc(config.blockingExpression())
+        + "\",\"blockingColumn\":\"" + esc(config.blockingColumn())
+        + "\",\"features\":[" + config.features().stream().map(f -> "\"" + esc(f) + "\"").collect(java.util.stream.Collectors.joining(","))
+        + "],\"sampleRows\":" + rows + ",\"distinctBlockingKeys\":" + frequencies.size()
+        + ",\"maxBucketSize\":" + maxBucketSize + ",\"blockingFrequencies\":[" + frequencyJson + "]}";
+    try {
+      Path root = config.artifactDirectory().toAbsolutePath().normalize();
+      Files.createDirectories(root);
+      var manifest = new ModelManifest(config.profile(), "0.7.0", "zingg-0.1-native", ModelType.BLOCKING_TREE.name(), config.features(), "");
+      var provenance = new ImportProvenance(root.toString(), "0.7.0", importerVersion, Instant.now(), "");
+      new ModelArtifactWriter(root).write(manifest, payload.getBytes(StandardCharsets.UTF_8), provenance);
+      return new Result(root, rows, prepared.columns());
+    } catch (Exception e) {
+      if (e instanceof DuckException de) throw de;
+      throw new DuckException("native training artifact write failed", e);
+    }
+  }
+  private static String esc(String value) {
+    StringBuilder out = new StringBuilder(value.length() + 8);
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      switch (c) {
+        case '\\' -> out.append("\\\\");
+        case '"' -> out.append("\\\"");
+        case '\b' -> out.append("\\b");
+        case '\f' -> out.append("\\f");
+        case '\n' -> out.append("\\n");
+        case '\r' -> out.append("\\r");
+        case '\t' -> out.append("\\t");
+        default -> { if (c < 0x20) out.append(String.format("\\u%04x", (int) c)); else out.append(c); }
+      }
+    }
+    return out.toString();
+  }
+  public record Result(Path artifactDirectory, long sampledRows, java.util.List<String> columns) { public Result { columns = java.util.List.copyOf(columns); } }
+}
