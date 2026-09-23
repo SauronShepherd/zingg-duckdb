@@ -2,7 +2,7 @@
 
 ## Start
 
-Launch `runtime-worker` with a JDBC URL, configured input/output roots, a bounded job count, and explicit resource limits, including `--max-rows`, `--max-temp-bytes`, `--max-spill-bytes`, and `--max-model-bytes`. Keep `--max-jobs 1` until concurrent-job behavior is deliberately enabled. Bundle `runtime/java` for installations that do not provide a system Java 21.
+Launch `runtime-worker` with a JDBC URL, configured input/output roots, a bounded job count, and explicit resource limits, including `--max-rows`, `--max-temp-bytes`, `--max-spill-bytes`, `--max-collect-bytes`, and `--max-model-bytes`. Keep `--max-jobs 1` until concurrent-job behavior is deliberately enabled. Bundle `runtime/java` for installations that do not provide a system Java 21.
 
 ## Data safety
 
@@ -35,7 +35,7 @@ The command emits JSON covering connection ownership, TEMP visibility, run-schem
 Use these worker controls explicitly in deployments:
 
 ```text
---memory-bytes <bytes> --max-temp-bytes <bytes> --max-spill-bytes <bytes>
+--memory-bytes <bytes> --max-temp-bytes <bytes> --max-spill-bytes <bytes> --max-collect-bytes <bytes>
 --max-output-bytes <bytes> --max-rows <rows> --max-model-bytes <bytes> --max-jobs <count>
 --offline
 ```

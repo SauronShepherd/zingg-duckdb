@@ -119,7 +119,7 @@ sequenceDiagram
 
 ## Configuration and safety defaults
 
-Supported worker options include `--memory-bytes`, `--max-temp-bytes`, `--max-spill-bytes`, `--max-output-bytes`, `--max-rows`, `--max-model-bytes`, `--max-jobs`, `--offline`, and `--allow-extension`. The default connector policy is offline and extensions are disabled. Arbitrary diagnostic `count`/`explain` SQL is disabled by default; use `--unsafe-debug-sql` only in a controlled diagnostic process.
+Supported worker options include `--memory-bytes`, `--max-temp-bytes`, `--max-spill-bytes`, `--max-collect-bytes`, `--max-output-bytes`, `--max-rows`, `--max-model-bytes`, `--max-jobs`, `--offline`, and `--allow-extension`. The default connector policy is offline and extensions are disabled. Arbitrary diagnostic `count`/`explain` SQL is disabled by default; use `--unsafe-debug-sql` only in a controlled diagnostic process.
 
 ## Validation and performance
 

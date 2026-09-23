@@ -26,6 +26,7 @@ java -jar runtime-worker.jar \
   --max-jobs 1 \
   --max-rows 1000000 \
   --max-spill-bytes 10737418240 \
+  --max-collect-bytes 268435456 \
   --max-model-bytes 268435456 \
   --input-root /data/input \
   --output-root /data/output

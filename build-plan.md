@@ -283,7 +283,7 @@ The attached repository audit is authoritative for the next implementation pass.
 ### P1 correctness, performance, and release gates
 
 - [ ] Replace extension-dependent Arrow egress with an offline-safe JDBC/Arrow IPC writer and qualify vectorized Arrow ingress.
-- [ ] Replace `max-spill-bytes` with typed input/output/collect/temp-directory budgets mapped to DuckDB settings.
+- [x] Replace the generic spill budget with typed input/output/collect/temp-directory budgets; collect and spill limits map to explicit runtime enforcement/settings.
 - [x] Add byte-bounded collection and typed collect limits; optimize repeated graph closure edge scans and retain the 301-node chain regression benchmark.
 - [ ] Add forced-spill, low-resource, cancellation, process-kill, orphan-cleanup, and concurrent-job tests.
 - [ ] Generate a complete transitive SBOM and run license/security review before release.
