@@ -135,6 +135,6 @@ final class DuckFrame implements Frame {
   public void writeParquet(java.nio.file.Path output){copy(output,"FORMAT PARQUET");}
   public void writeJson(java.nio.file.Path output){copy(output,"FORMAT JSON, ARRAY true");}
   public void writeArrow(java.nio.file.Path output){copy(output,"FORMAT ARROW");}
-  private void copy(java.nio.file.Path output,String options){try{PathPolicySupport.createParent(output);try(var s=job.connection().createStatement()){s.execute("COPY ("+plan+") TO "+DuckPath.sqlLiteral(output.toAbsolutePath().normalize())+" ("+options+")");}if(Files.exists(output))job.budget().enforceBytes(Files.size(output));}catch(SQLException|java.io.IOException e){throw new DuckException("write failed",e);}}
+  private void copy(java.nio.file.Path output,String options){try{PathPolicySupport.createParent(output);try(var s=job.connection().createStatement()){s.execute("COPY ("+plan+") TO "+DuckPath.sqlLiteral(output.toAbsolutePath().normalize())+" ("+options+")");}if(Files.exists(output))job.budget().enforceOutputBytes(Files.size(output));}catch(SQLException|java.io.IOException e){throw new DuckException("write failed",e);}}
   private static final class PathPolicySupport { static void createParent(java.nio.file.Path p)throws java.io.IOException{var parent=p.toAbsolutePath().normalize().getParent();if(parent!=null)Files.createDirectories(parent);} }
 }

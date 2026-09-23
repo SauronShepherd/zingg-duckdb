@@ -19,7 +19,7 @@ public final class DuckPipeReader {
       Path p=policy==null?files.get(i).toAbsolutePath().normalize():policy.input(files.get(i));
       if (java.nio.file.Files.isSymbolicLink(p)) throw new DuckException("symbolic-link inputs are not allowed: "+p);
       if (!java.nio.file.Files.isRegularFile(p)) throw new DuckException("input file does not exist: "+p);
-      try { budget.enforceBytes(java.nio.file.Files.size(p)); } catch (java.io.IOException e) { throw new DuckException("cannot inspect input size: "+p,e); }
+      try { budget.enforceInputBytes(java.nio.file.Files.size(p)); } catch (java.io.IOException e) { throw new DuckException("cannot inspect input size: "+p,e); }
       if (isArrow(p)) {
         Frame current=ArrowFileSupport.read(job,p).withColumn("z_source", i);
         result=result==null?current:result.union(current, mode==UnionMode.MATCH_BY_NAME, mode==UnionMode.MATCH_BY_NAME);

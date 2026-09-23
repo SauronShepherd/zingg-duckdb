@@ -17,8 +17,9 @@ public final class Main {
       case "--online"->offline=false; case "--offline"->offline=true; case "--allow-extension"->extensions.add(a[++i].toLowerCase(java.util.Locale.ROOT));
       case "--input-root"->inputRoot=Path.of(a[++i]); case "--output-root"->outputRoot=Path.of(a[++i]); default->url=a[i];
     }}
-    if(maxModel<0||maxTemp<0||maxOutput<0)throw new IllegalArgumentException("resource limits cannot be negative");
-    try(var runtime=new CompatibilityRuntime(new RuntimeConfig(url,threads,memory,null,jobs,maxTemp,offline,extensions),null,"zingg-0.7.0-duckdb-1.5.5.1",new ResourceBudget(memory,maxRows,maxSpill));
+    if(maxModel<0||maxTemp<0||maxOutput<0||maxSpill<0)throw new IllegalArgumentException("resource limits cannot be negative");
+    long effectiveTemp=maxTemp>0?maxTemp:maxSpill;
+    try(var runtime=new CompatibilityRuntime(new RuntimeConfig(url,threads,memory,null,jobs,effectiveTemp,offline,extensions),null,"zingg-0.7.0-duckdb-1.5.5.1",new ResourceBudget(memory,maxRows,0,maxOutput,maxSpill));
         var server=new ConfiguredWorkerServer(runtime,new io.zingg.duckdb.api.PathPolicy(inputRoot,outputRoot),maxModel,maxOutput))
       {server.serve(new java.io.InputStreamReader(System.in),new java.io.OutputStreamWriter(System.out));}
   }
