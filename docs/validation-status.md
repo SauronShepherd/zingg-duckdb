@@ -56,6 +56,7 @@ The latest audit remediation pass added and verified the following changes:
 - RSS subprocess fallbacks are bounded by a two-second timeout and forcibly terminated on timeout, preventing diagnostics from blocking the worker.
 - GitHub Actions now uses `actions/setup-java@v5` and explicitly checks `test -x ./mvnw` on Unix runners, guarding the previously observed wrapper-permission failure. Hosted-matrix execution remains pending external CI evidence.
 - Predicate partitioning now has the explicit `partitionByPredicate` API name, while `split(Expression)` remains a compatibility alias; the Zingg-shaped string-splitting overload is distinct. Direct matching/remaining-count coverage passes, and the complete 46-test Java suite passes.
+- A fresh benchmark smoke run completed at size 1000 with 3 repetitions: startup median 30.899 ms, SQL median 1.575 ms, and graph median 91.487 ms on the current Windows/JDK 21/DuckDB JDBC 1.5.5.1 environment. This is observational evidence only; release thresholds remain unestablished.
 - Backend-native blocking histograms now use a distinct `duckdb-native-0.1` profile, `0.1.0` version, and `BACKEND_BLOCKING_HISTOGRAM` model type; strict `zingg-0.7.0` blocking-tree artifacts remain separately validated. The full 44-test Java suite passed.
 - Model loading now rejects mixed strict/backend profile, version, and model-type identities; the full 45-test Java suite passed after this guard was added.
 
