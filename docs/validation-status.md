@@ -48,6 +48,7 @@ The latest audit remediation pass added and verified the following changes:
 - The build plan now distinguishes locally proven model envelope/checksum/version rejection, deterministic pair projection/file-ingress metadata, and structured worker payloads from their still-pending real-Zingg differential gates.
 - Python client coverage now verifies that `max_collect_bytes` is forwarded to the default worker command; 5/5 Python tests pass.
 - Added the Zingg-shaped string-splitting overload while retaining predicate split semantics; targeted metadata and structural capability tests pass, with differential parity still open.
+- Arrow egress experiment: direct Arrow Java 19 `ArrowFileWriter` round-trip was attempted and rejected by the runtime with `UnsupportedOperationException: sun.misc.Unsafe or java.nio.DirectByteBuffer.<init>(long, int) not available`; the experiment was removed, so offline-safe Arrow egress remains an explicit blocker rather than an unverified claim.
 
 These changes reduce confirmed local defects but do not close the strict Zingg v0.7 adapter, real artifact parity, differential Spark harness, or cross-platform CI evidence gates listed below.
 
