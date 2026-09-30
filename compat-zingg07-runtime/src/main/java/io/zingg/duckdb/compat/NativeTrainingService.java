@@ -2,6 +2,8 @@ package io.zingg.duckdb.compat;
 
 import io.zingg.duckdb.api.DuckException;
 import io.zingg.duckdb.api.Frame;
+import io.zingg.duckdb.api.CancellationToken;
+import io.zingg.duckdb.engine.DuckCancellation;
 import io.zingg.duckdb.model.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -19,13 +21,21 @@ public final class NativeTrainingService {
   }
   public Result train(Frame input, NativeTrainingConfig config) {
     if (input == null || config == null) throw new IllegalArgumentException("training input and config are required");
+    var requestCancellation = DuckCancellation.current();
+    CancellationToken cancellation = requestCancellation == null
+        ? CancellationToken.none() : requestCancellation;
+    cancellation.throwIfCancelled();
     Frame prepared = new TrainingPlan().prepare(input, new TrainingPlan.Config(config.blockingExpression(), config.blockingColumn(), config.maxRows()));
-    long rows = prepared.count();
+    cancellation.throwIfCancelled();
+    long rows = prepared.count(cancellation);
     // TreeMap makes the serialized tree independent of input partition/order.
     var frequencies = new TreeMap<String,Long>();
     int blockingIndex = prepared.columns().indexOf(config.blockingColumn());
     if (blockingIndex < 0) throw new DuckException("training blocking column is not present: " + config.blockingColumn());
-    for (var row : prepared.collect()) {
+    var trainingRows = prepared.collect(cancellation);
+    for (int rowIndex = 0; rowIndex < trainingRows.size(); rowIndex++) {
+      if ((rowIndex & 0x3ff) == 0) cancellation.throwIfCancelled();
+      var row = trainingRows.get(rowIndex);
       Object value = row.values().get(blockingIndex);
       String key = value == null ? "__NULL__" : String.valueOf(value);
       frequencies.merge(key, 1L, Long::sum);
@@ -41,11 +51,14 @@ public final class NativeTrainingService {
         + "],\"sampleRows\":" + rows + ",\"distinctBlockingKeys\":" + frequencies.size()
         + ",\"maxBucketSize\":" + maxBucketSize + ",\"blockingFrequencies\":[" + frequencyJson + "]}";
     try {
+      cancellation.throwIfCancelled();
       Path root = config.artifactDirectory().toAbsolutePath().normalize();
       Files.createDirectories(root);
       var manifest = new ModelManifest("duckdb-native-0.1", "0.1.0", "zingg-0.1-native", ModelType.BACKEND_BLOCKING_HISTOGRAM.name(), config.features(), "");
       var provenance = new ImportProvenance(root.toString(), "0.7.0", importerVersion, Instant.now(), "");
-      new ModelArtifactWriter(root).write(manifest, payload.getBytes(StandardCharsets.UTF_8), provenance);
+      var writerCancellation = DuckCancellation.current();
+      new ModelArtifactWriter(root, writerCancellation == null ? () -> false : writerCancellation::isCancelled)
+          .write(manifest, payload.getBytes(StandardCharsets.UTF_8), provenance);
       return new Result(root, rows, prepared.columns());
     } catch (Exception e) {
       if (e instanceof DuckException de) throw de;

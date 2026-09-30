@@ -19,6 +19,12 @@ class ConnectorPolicyTest {
   }
 
   @Test
+  void configuredAllowlistIsCaseNormalized() {
+    var policy = new ConnectorPolicy(false, java.util.Set.of("HTTPFS"));
+    assertDoesNotThrow(() -> policy.requireAllowed("httpfs"));
+  }
+
+  @Test
   void invalidExtensionNamesAreRejected() {
     assertThrows(IllegalArgumentException.class, () -> new ConnectorPolicy(false, java.util.Set.of("http-fs")));
   }

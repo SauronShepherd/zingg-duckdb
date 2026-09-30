@@ -6,6 +6,10 @@ import java.util.List;
 public interface LabelDecisionProvider {
   LabelBatch getPendingLabels(LabelRequest request);
   ApplyLabelsResult applyLabels(ApplyLabelsRequest request);
+  /** Definitive accepted pair decisions available for resumed training. */
+  default List<LabelDecision> acceptedDecisions() {
+    throw new UnsupportedOperationException("label provider does not support decision recovery");
+  }
 
   record LabelRequest(String requestId, String schemaVersion, String idempotencyKey, int limit) {
     public LabelRequest {
@@ -19,6 +23,11 @@ public interface LabelDecisionProvider {
       require(requestId, "requestId"); require(schemaVersion, "schemaVersion"); require(idempotencyKey, "idempotencyKey");
       decisions = List.copyOf(decisions == null ? List.of() : decisions);
       if (decisions.size() > 100_000) throw new IllegalArgumentException("too many decisions");
+      var pairs = new java.util.HashSet<PairKey>();
+      for (var decision : decisions) {
+        if (!pairs.add(new PairKey(decision.leftId(), decision.rightId())))
+          throw new IllegalArgumentException("duplicate pair decision in request");
+      }
     }
   }
 
@@ -46,6 +55,8 @@ public interface LabelDecisionProvider {
   }
 
   enum Decision { MATCH, NON_MATCH, UNKNOWN }
+
+  record PairKey(String leftId, String rightId) {}
 
   private static void require(String value, String name) { if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " is required"); }
 }

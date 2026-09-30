@@ -18,9 +18,11 @@ Use the read-only `status` operation during startup and incident triage to recor
 
 Send `shutdown`, wait for the response, then close the process pipes. Job-local TEMP objects are released when the job closes. Remove abandoned output artifacts only after checking the associated package hash and provenance.
 
+When a worker is forcibly terminated while using a persistent DuckDB file, normal job `finally`/`close()` cleanup cannot run. On the next `DuckRuntime` open, the engine drops stale schemas in its reserved `_zingg_run_*` namespace, which removes partially imported Arrow tables and other job-local objects. Active run schemas in the same JVM are tracked and are not removed when another runtime opens. Treat `_zingg_run_*` as an internal reserved namespace; do not store user-owned schemas there. Process-wide cancellation still does not roll back already committed output files or other durable side effects, and cleanup occurs on database reopen rather than at the instant of process termination.
+
 ## Native Image prerequisite
 
-Native Image packaging is not enabled by the current Windows build environment. A release job that adds a native executable must provision a supported GraalVM distribution and verify both `native-image` and its compiler toolchain before attempting the build. The native-image artifact must remain a separate, explicitly versioned deliverable until startup, resource-limit, shutdown, and clean-install behavior have been verified independently from the JVM worker. The build-plan item remains open until that infrastructure and verification path exists.
+Native Image remains an experimental, separate deliverable. A local Linux x64 executable was built with Oracle GraalVM 21.0.12+7.1 and passed the protocol plus classifier artifact reload/MATCH comparison against the JVM worker; evidence is recorded in `benchmarks/native-image-2026-09-29-wsl.json`. This does not qualify Windows or macOS/ARM builds, resource-limit/failure/shutdown behavior, clean installation, or release support. Release CI must provision and pin GraalVM and its native compiler toolchain, reproduce the artifact, review the Native Image deserialization warning and complete security/license checks, then run broader workload/performance qualification before enabling or distributing this artifact. The normal JVM distribution remains the supported path.
 
 ## Implemented diagnostic entry points
 

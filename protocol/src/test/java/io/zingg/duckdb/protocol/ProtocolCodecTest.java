@@ -14,6 +14,13 @@ class ProtocolCodecTest {
   }
 
   @Test
+  void encodingMatchesCrossLanguageWireGolden() {
+    var message = new WorkerMessage("golden", "ping", "slash\\tab\tline\nunicode-λ\rend");
+    assertEquals("golden\tping\tslash\\\\tab\\tline\\nunicode-λ\rend", ProtocolCodec.encode(message));
+    assertEquals(message, ProtocolCodec.decode(ProtocolCodec.encode(message)));
+  }
+
+  @Test
   void rejectsMalformedOperationsAndMessages() {
     assertThrows(IllegalArgumentException.class, () -> ProtocolCodec.requireOperation("match/run"));
     assertThrows(IllegalArgumentException.class, () -> ProtocolCodec.decode("only-two-fields\tmatch.run"));

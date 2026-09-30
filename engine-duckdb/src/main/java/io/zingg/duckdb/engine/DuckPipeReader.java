@@ -13,6 +13,14 @@ public final class DuckPipeReader {
   public DuckPipeReader(JobHandle job,io.zingg.duckdb.api.PathPolicy policy) { this(job,policy,ResourceBudget.unlimited()); }
   public DuckPipeReader(JobHandle job,io.zingg.duckdb.api.PathPolicy policy,ResourceBudget budget) { if (!(job instanceof DuckJob j)) throw new IllegalArgumentException("DuckJob required"); this.job=j; this.policy=policy; this.budget=budget==null?ResourceBudget.unlimited():budget; }
   public Frame read(List<Path> files, UnionMode mode) {
+    return read(files, mode, true);
+  }
+  /**
+   * Reads and unions source files, optionally assigning the backend's row ID.
+   * Phases whose input contract already carries entity IDs (for example LINK
+   * scored-pair endpoints) must preserve those values rather than regenerate them.
+   */
+  public Frame read(List<Path> files, UnionMode mode, boolean assignRowIds) {
     if (files==null || files.isEmpty()) throw new DuckException("at least one input pipe is required");
     Frame result=null;
     for (int i=0;i<files.size();i++) {
@@ -21,14 +29,17 @@ public final class DuckPipeReader {
       if (!java.nio.file.Files.isRegularFile(p)) throw new DuckException("input file does not exist: "+p);
       try { budget.enforceInputBytes(java.nio.file.Files.size(p)); } catch (java.io.IOException e) { throw new DuckException("cannot inspect input size: "+p,e); }
       if (isArrow(p)) {
-        Frame current=ArrowFileSupport.read(job,p).withColumn("z_source", i);
+        Frame current=ArrowFileSupport.readWithAppender(job,p).withColumn("z_source", i);
         result=result==null?current:result.union(current, mode==UnionMode.MATCH_BY_NAME, mode==UnionMode.MATCH_BY_NAME);
         continue;
       }
       Frame current=job.sql("SELECT * FROM "+readerSql(p)).withColumn("z_source", i);
       result=result==null?current:result.union(current, mode==UnionMode.MATCH_BY_NAME, mode==UnionMode.MATCH_BY_NAME);
     }
-    Frame merged=RowIdAssigner.assign(result.cache(),"z_zid").cache(); budget.enforceRows(merged.count()); return merged;
+    Frame merged=result.cache();
+    if(assignRowIds) merged=RowIdAssigner.assign(merged,"z_zid").cache();
+    budget.enforceRows(merged.count());
+    return merged;
   }
   private static boolean isArrow(Path p){String n=p.getFileName().toString().toLowerCase(java.util.Locale.ROOT);return n.endsWith(".arrow")||n.endsWith(".feather");}
   private static String readerSql(Path p){

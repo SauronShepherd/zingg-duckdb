@@ -13,4 +13,4 @@ if [ ! -f "$JAR" ]; then
   echo "Runtime worker is missing: $JAR" >&2
   exit 2
 fi
-exec "$JAVA" -jar "$JAR" "$@"
+exec "$JAVA" --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED -jar "$JAR" "$@"

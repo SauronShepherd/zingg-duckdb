@@ -5,9 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.zingg.duckdb.api.DuckException;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class HashRegistryTest {
+  @Test
+  void registeredHashAndNormalizationInventoryIsStable() {
+    assertEquals(Set.of("java_hash", "lower", "trim", "sha256", "md5", "length", "java_round"),
+        new HashRegistry().names());
+  }
+
   @Test
   void preservesJavaHashAndNullSemantics() {
     var registry = new HashRegistry();

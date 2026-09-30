@@ -2,6 +2,8 @@ package io.zingg.duckdb.compat;
 
 import io.zingg.duckdb.api.DuckException;
 import io.zingg.duckdb.api.Frame;
+import io.zingg.duckdb.api.CancellationToken;
+import io.zingg.duckdb.engine.DuckCancellation;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -15,6 +17,10 @@ public final class NativeClassifierTrainer {
       features = List.copyOf(features == null ? List.of() : features);
       if (features.isEmpty() || features.stream().anyMatch(f -> f == null || f.isBlank()))
         throw new IllegalArgumentException("classifier features are required");
+      if (features.stream().distinct().count() != features.size())
+        throw new IllegalArgumentException("classifier features must be unique");
+      if (features.contains(labelColumn))
+        throw new IllegalArgumentException("classifier label column cannot also be a feature");
       if (iterations < 1 || iterations > 1_000_000 || !Double.isFinite(learningRate) || learningRate <= 0
           || !Double.isFinite(l2) || l2 < 0 || maxRows < 1) throw new IllegalArgumentException("invalid classifier training parameters");
     }
@@ -25,25 +31,49 @@ public final class NativeClassifierTrainer {
 
   public record Result(Path artifactDirectory, long rows, double[] weights, double intercept) {
     public Result { weights = weights.clone(); }
+    @Override public double[] weights() { return weights.clone(); }
   }
 
   public Result train(Frame input, Config config) {
     if (input == null || config == null) throw new IllegalArgumentException("classifier input and config are required");
-    Frame data = input.limit(config.maxRows());
+    DuckCancellation requestCancellation = DuckCancellation.current();
+    CancellationToken cancellation = requestCancellation == null
+        ? CancellationToken.none() : requestCancellation;
+    cancellation.throwIfCancelled();
+    long inputRows = input.count(cancellation);
+    if (inputRows > config.maxRows())
+      throw new DuckException("classifier maxRows exceeded: " + inputRows + " > " + config.maxRows());
+    Frame data = input;
     List<String> columns = data.columns();
     int[] featureIndexes = indexes(columns, config.features());
     int labelIndex = columns.indexOf(config.labelColumn());
     if (labelIndex < 0) throw new DuckException("classifier label column is not present: " + config.labelColumn());
-    List<io.zingg.duckdb.api.Row> rows = data.collect();
+    List<io.zingg.duckdb.api.Row> rows = data.collect(cancellation);
     if (rows.isEmpty()) throw new DuckException("classifier training input is empty");
+    if (rows.size() != inputRows)
+      throw new DuckException("classifier input row count changed between count and collect");
     double[] weights = new double[featureIndexes.length];
     double intercept = 0d;
+    boolean hasPositive = false;
+    boolean hasNegative = false;
+    double[] labels = new double[rows.size()];
+    for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+      if ((rowIndex & 0x3ff) == 0) cancellation.throwIfCancelled();
+      labels[rowIndex] = label(rows.get(rowIndex).values().get(labelIndex));
+      hasPositive |= labels[rowIndex] == 1d;
+      hasNegative |= labels[rowIndex] == 0d;
+    }
+    if (!hasPositive || !hasNegative)
+      throw new DuckException("classifier training requires both positive and negative labels");
     for (int iteration = 0; iteration < config.iterations(); iteration++) {
+      cancellation.throwIfCancelled();
       double[] gradient = new double[weights.length];
       double interceptGradient = 0d;
-      for (var row : rows) {
+      for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+        if ((rowIndex & 0x3ff) == 0) cancellation.throwIfCancelled();
+        var row = rows.get(rowIndex);
         double[] x = vector(row, featureIndexes);
-        double y = label(row.values().get(labelIndex));
+        double y = labels[rowIndex];
         double prediction = sigmoid(intercept + dot(weights, x));
         double error = prediction - y;
         interceptGradient += error;
@@ -58,6 +88,7 @@ public final class NativeClassifierTrainer {
     }
     if (!Double.isFinite(intercept) || java.util.Arrays.stream(weights).anyMatch(w -> !Double.isFinite(w)))
       throw new DuckException("classifier training produced non-finite coefficients");
+    cancellation.throwIfCancelled();
     Path artifact = new NativeClassifierArtifact().write(new NativeClassifierArtifact.Config(
         config.profile(), config.features(), weights, intercept, true, config.artifactDirectory()));
     return new Result(artifact, rows.size(), weights, intercept);

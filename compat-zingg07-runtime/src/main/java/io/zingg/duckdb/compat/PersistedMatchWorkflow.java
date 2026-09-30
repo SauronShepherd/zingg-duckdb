@@ -3,8 +3,12 @@ package io.zingg.duckdb.compat;
 import io.zingg.duckdb.api.DuckException;
 import io.zingg.duckdb.api.Frame;
 import io.zingg.duckdb.model.ModelReader;
+import io.zingg.duckdb.engine.DuckExpr;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -18,12 +22,20 @@ public final class PersistedMatchWorkflow implements AutoCloseable {
   private ZinggJob job;
   private State state = State.CREATED;
   private Path model;
+  private LinearClassifier classifier;
   private Frame trainingData;
   private int appliedLabels;
+  private final Map<PairKey, LabelDecisionProvider.LabelDecision> decisions = new LinkedHashMap<>();
+  private record PairKey(String leftId, String rightId) {}
 
   public PersistedMatchWorkflow(CompatibilityRuntime runtime) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.job = new ZinggJob(runtime);
+  }
+
+  public Frame read(List<Path> inputs, ZinggJob.Phase phase, io.zingg.duckdb.api.PathPolicy policy) {
+    requireOpen();
+    return job.read(inputs, phase, policy);
   }
 
   public Frame findTrainingData(Frame input, TrainingPlan.Config config) {
@@ -34,17 +46,73 @@ public final class PersistedMatchWorkflow implements AutoCloseable {
   }
 
   public LabelDecisionProvider.ApplyLabelsResult applyLabels(LabelDecisionProvider.ApplyLabelsRequest request) {
-    requireState(State.TRAINING_DATA_READY);
+    requireState(State.TRAINING_DATA_READY, State.LABELS_APPLIED);
     var result = job.applyLabels(request);
-    appliedLabels += result.applied();
+    if (!result.replay()) {
+      appliedLabels += result.applied();
+      for (var decision : request.decisions()) {
+        boolean rejected = result.rejections().stream().anyMatch(r ->
+            r.leftId().equals(decision.leftId()) && r.rightId().equals(decision.rightId()));
+        if (!rejected && decision.decision() != LabelDecisionProvider.Decision.UNKNOWN)
+          decisions.putIfAbsent(new PairKey(decision.leftId(), decision.rightId()), decision);
+      }
+    }
     state = State.LABELS_APPLIED;
     return result;
+  }
+
+  /** Resume training from definitive decisions recovered by the configured provider. */
+  public void restoreAppliedLabels() {
+    requireState(State.TRAINING_DATA_READY);
+    for (var decision : runtime.labels().acceptedDecisions()) {
+      if (decision.decision() == LabelDecisionProvider.Decision.UNKNOWN) continue;
+      decisions.put(new PairKey(decision.leftId(), decision.rightId()), decision);
+    }
+    appliedLabels = decisions.size();
+    if (decisions.isEmpty()) throw new DuckException("no applied labels are available for recovery");
+    state = State.LABELS_APPLIED;
   }
 
   public NativeTrainingService.Result trainMatch(Frame input, NativeTrainingConfig config) {
     requireState(State.LABELS_APPLIED, State.TRAINING_DATA_READY);
     var result = job.trainNative(Objects.requireNonNull(input, "input"), config);
     model = result.artifactDirectory();
+    classifier = null; // A blocking histogram is not a scoring model.
+    state = State.MODEL_PERSISTED;
+    return result;
+  }
+
+  /** Derive binary training labels from accepted pair decisions, never from caller-supplied labels. */
+  public NativeClassifierTrainer.Result trainClassifier(Frame pairFeatures, String leftIdColumn,
+      String rightIdColumn, NativeClassifierTrainer.Config config) {
+    requireState(State.LABELS_APPLIED);
+    Objects.requireNonNull(pairFeatures, "pairFeatures");
+    Objects.requireNonNull(config, "config");
+    if (decisions.values().stream().noneMatch(d -> d.decision() == LabelDecisionProvider.Decision.MATCH)
+        || decisions.values().stream().noneMatch(d -> d.decision() == LabelDecisionProvider.Decision.NON_MATCH))
+      throw new DuckException("classifier training requires positive and negative applied labels");
+    if (!pairFeatures.columns().contains(leftIdColumn) || !pairFeatures.columns().contains(rightIdColumn))
+      throw new DuckException("classifier pair ID columns are missing");
+    if (pairFeatures.columns().contains(config.labelColumn()))
+      throw new DuckException("classifier label column must come from applied decisions");
+    String left = "CAST(" + quote(leftIdColumn) + " AS VARCHAR)";
+    String right = "CAST(" + quote(rightIdColumn) + " AS VARCHAR)";
+    StringBuilder expression = new StringBuilder("CASE");
+    for (var decision : decisions.values()) expression.append(" WHEN ").append(left).append(" = ")
+        .append(literal(decision.leftId())).append(" AND ").append(right).append(" = ")
+        .append(literal(decision.rightId())).append(" THEN ")
+        .append(decision.decision() == LabelDecisionProvider.Decision.MATCH ? "1" : "0");
+    expression.append(" ELSE NULL END");
+    Frame labeled = pairFeatures.withColumn(config.labelColumn(), new DuckExpr(expression.toString()))
+        .filter(new DuckExpr(quote(config.labelColumn()) + " IS NOT NULL"));
+    long labeledRows = labeled.count();
+    if (labeledRows != decisions.size())
+      throw new DuckException("classifier labeled pairs do not match applied decisions exactly");
+    if (labeledRows > config.maxRows())
+      throw new DuckException("classifier maxRows would discard applied decisions");
+    var result = job.trainClassifier(labeled, config);
+    model = result.artifactDirectory();
+    classifier = loadClassifier(model);
     state = State.MODEL_PERSISTED;
     return result;
   }
@@ -53,18 +121,43 @@ public final class PersistedMatchWorkflow implements AutoCloseable {
   public void restart() {
     requireOpen();
     if (model == null) throw new DuckException("cannot restart before a model is persisted");
+    LinearClassifier reloaded = loadClassifier(model);
     job.close();
     job = new ZinggJob(runtime);
-    try { ModelReader.load(model, 0); }
-    catch (IOException e) { throw new DuckException("persisted model cannot be reloaded after restart", e); }
+    classifier = reloaded;
     state = State.RESTARTED;
   }
 
-  public Frame match(Frame input, String predicate) {
+  /** Load a classifier into a newly constructed workflow/runtime after a process restart. */
+  public void restartFromModel(Path artifact) {
+    requireState(State.CREATED);
+    LinearClassifier reloaded = loadClassifier(Objects.requireNonNull(artifact, "artifact"));
+    model = artifact.toAbsolutePath().normalize();
+    classifier = reloaded;
+    state = State.RESTARTED;
+  }
+
+  public Frame match(Frame input, Matcher.MatchConfig config) {
     requireState(State.RESTARTED, State.MODEL_PERSISTED, State.MATCHED);
-    Frame output = job.match(Objects.requireNonNull(input, "input"), predicate);
+    if (classifier == null) throw new DuckException("persisted model is not a classifier");
+    var matcher = new Matcher();
+    Frame output = matcher.scoreLinear(matcher.candidates(Objects.requireNonNull(input, "input"),
+        Objects.requireNonNull(config, "config")), config, classifier).cache();
     state = State.MATCHED;
     return output;
+  }
+
+  private static LinearClassifier loadClassifier(Path artifact) {
+    try { return (LinearClassifier) new ModelScorerRegistry().create(ModelReader.load(artifact, 0)); }
+    catch (IOException e) { throw new DuckException("persisted classifier cannot be reloaded", e); }
+  }
+  private static String quote(String identifier) { return "\"" + identifier.replace("\"", "\"\"") + "\""; }
+  private static String literal(String value) {
+    String[] segments = value.split("\u0000", -1);
+    String expression = java.util.Arrays.stream(segments)
+        .map(segment -> "'" + segment.replace("'", "''") + "'")
+        .collect(java.util.stream.Collectors.joining(" || chr(0) || "));
+    return segments.length == 1 ? expression : "(" + expression + ")";
   }
 
   public State state() { return state; }

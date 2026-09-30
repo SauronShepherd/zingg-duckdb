@@ -13,5 +13,10 @@ where = ["python"]
 include = ["zingg_duckdb*"]
 exclude = ["tests*"]
 
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["python"]
+norecursedirs = ["dist-*", "target", ".git", ".venv", "venv"]
+
 [tool.setuptools.package-dir]
 "" = "python"

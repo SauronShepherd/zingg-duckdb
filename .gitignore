@@ -7,4 +7,7 @@ __pycache__/
 runtime/
 dist/
 dist-current/
+dist-wsl/
+dist-native*/
+dist-jdk-module-check/
 fixtures/generated/

@@ -33,4 +33,22 @@ class BenchmarkInfrastructureTest {
     assertTrue(Files.size(written) > 0);
     assertThrows(java.nio.file.FileAlreadyExistsException.class, () -> capture.write(temp));
   }
+
+  @Test
+  void benchmarkComparisonRejectsRegressionsAndHandlesZeroBaselines() {
+    var now = Instant.now();
+    var baseline = new BenchmarkHistory.Measurement("profile", "input", "config", 0, 0, 0, 0, now);
+    var nonZero = new BenchmarkHistory.Measurement("profile", "input", "config", 1, 0, 0, 0, now);
+    var zeroComparison = new BenchmarkHistory(Path.of("ignored.json")).compare(
+        nonZero, baseline, BenchmarkHistory.Thresholds.defaults());
+    assertFalse(zeroComparison.compatible());
+    assertEquals(Double.POSITIVE_INFINITY, zeroComparison.runtimeRatio());
+
+    var current = new BenchmarkHistory.Measurement("profile", "input", "config", 130, 100, 100, 100, now);
+    var ordinaryBaseline = new BenchmarkHistory.Measurement("profile", "input", "config", 100, 100, 100, 100, now);
+    var regression = new BenchmarkHistory(Path.of("ignored.json")).compare(
+        current, ordinaryBaseline, BenchmarkHistory.Thresholds.defaults());
+    assertFalse(regression.compatible());
+    assertEquals("benchmark regression threshold exceeded", regression.reason());
+  }
 }

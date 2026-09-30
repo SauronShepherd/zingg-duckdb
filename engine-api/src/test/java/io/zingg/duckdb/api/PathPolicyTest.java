@@ -19,8 +19,21 @@ class PathPolicyTest {
 
   @Test
   void rejectsRemoteUris() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        java.io.File.separatorChar == '/', "default Windows Path rejects URI-shaped strings before PathPolicy receives them");
     var policy = new PathPolicy(null, null);
-    assertThrows(RuntimeException.class, () -> policy.input(Path.of("https://example.test/data.csv")));
+    for (String uri : java.util.List.of(
+        "https://example.test/data.csv", "s3://bucket/data.csv", "file:///tmp/data.csv")) {
+      assertThrows(DuckException.class, () -> policy.input(Path.of(uri)), uri);
+      assertThrows(DuckException.class, () -> policy.output(Path.of(uri)), uri);
+    }
+  }
+
+  @Test
+  void acceptsWindowsDriveAbsolutePathOnEveryPlatform() {
+    var policy = new PathPolicy(null, null);
+    assertEquals(Path.of("C:\\data\\records.csv").toAbsolutePath().normalize(),
+        policy.input(Path.of("C:\\data\\records.csv")));
   }
 
   @Test

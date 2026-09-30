@@ -11,5 +11,5 @@ if not exist "%JAR%" (
   echo Runtime worker is missing: "%JAR%" 1>&2
   exit /b 2
 )
-"%JAVA%" -jar "%JAR%" %*
+"%JAVA%" --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED -jar "%JAR%" %*
 exit /b %ERRORLEVEL%

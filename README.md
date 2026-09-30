@@ -126,6 +126,8 @@ Supported worker options include `--memory-bytes`, `--max-temp-bytes`, `--max-sp
 ```powershell
 ./mvnw.cmd test
 $env:PYTHONPATH = "python"; $env:PYTHONWARNINGS = "error"
+# PowerShell: $env:PYTHONPATH = "python"
+# POSIX shells: PYTHONPATH=python
 python -m unittest discover -s python/tests -v
 ```
 

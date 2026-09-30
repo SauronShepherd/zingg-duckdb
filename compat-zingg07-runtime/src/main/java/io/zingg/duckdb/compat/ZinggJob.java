@@ -11,7 +11,12 @@ public final class ZinggJob implements AutoCloseable {
   private final CompatibilityRuntime runtime; private final JobHandle job;
   public ZinggJob(CompatibilityRuntime runtime){this.runtime=Objects.requireNonNull(runtime);this.job=runtime.openJob();}
   public Frame read(List<Path> inputs,Phase phase){return read(inputs,phase,null);}
-  public Frame read(List<Path> inputs,Phase phase,io.zingg.duckdb.api.PathPolicy policy){var mode=phase==Phase.MATCH?DuckPipeReader.UnionMode.MATCH_BY_NAME:DuckPipeReader.UnionMode.TRAINING_POSITIONAL;return new DuckPipeReader(job,policy,runtime.budget()).read(inputs,mode);}
+  public Frame read(List<Path> inputs,Phase phase,io.zingg.duckdb.api.PathPolicy policy){
+    var mode=phase==Phase.MATCH||phase==Phase.LINK
+        ?DuckPipeReader.UnionMode.MATCH_BY_NAME:DuckPipeReader.UnionMode.TRAINING_POSITIONAL;
+    Frame merged=new DuckPipeReader(job,policy,runtime.budget()).read(inputs,mode,phase!=Phase.LINK);
+    return merged;
+  }
   public Frame match(Frame input,String predicate){return input.filter(new DuckExpr(io.zingg.duckdb.engine.SqlSafety.predicate(predicate))).cache();}
   public Frame matchCandidates(Frame input,Matcher.MatchConfig config){return new Matcher().score(new Matcher().candidates(input,config),config).cache();}
   public Frame trainingData(Frame input,TrainingPlan.Config config){return new TrainingPlan().prepare(input,config);}
@@ -25,6 +30,13 @@ public final class ZinggJob implements AutoCloseable {
   public LabelDecisionProvider.ApplyLabelsResult applyLabels(LabelDecisionProvider.ApplyLabelsRequest request){return runtime.labels().applyLabels(request);}
   public List<LinkOutput.Link> linkOutput(Collection<LinkOutput.Link> links,boolean asymmetric){return asymmetric?LinkOutput.asymmetric(links):LinkOutput.preserveRight(links);}
   public Frame executePhase(ZinggJob.Phase phase,Frame input){return runtime.phases().execute(phase,this,input).cache();}
+  Frame sql(String sql){return job.sql(sql);}
+  String schemaName(){return ((io.zingg.duckdb.engine.DuckJob) job).schemaName();}
+  Frame createFrame(String table, List<String> columns, List<String> types, List<List<Object>> rows) {
+    if (!(job instanceof io.zingg.duckdb.engine.DuckJob duckJob))
+      throw new DuckException("native LINK requires the DuckDB job implementation");
+    return duckJob.createFrame(table, columns, types, rows);
+  }
   public long count(Frame frame){return frame.count();}
   public JobId id(){return job.id();}
   public void close(){job.close();}
