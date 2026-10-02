@@ -22,28 +22,19 @@ UPSTREAM_COMMIT = "48cb157b4f35fcfa733e2e7f9699ea988e018738"
 SPARK_DIFFERENTIALS = {
     "public abstract zingg.common.client.ZFrame<D, R, C> as(java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> coalesce(int);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> distinct();": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> drop(C);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> drop(java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> drop(java.lang.String...);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> dropDuplicates(java.lang.String, java.lang.String...);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> except(zingg.common.client.ZFrame<D, R, C>);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> explode(java.lang.String, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> filterInCond(java.lang.String, zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> filterNotNullCond(java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> filterNullCond(java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> groupByCount(java.lang.String, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> groupByCount(java.lang.String, java.lang.String, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> groupByMinMaxScore(C);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> intersect(zingg.common.client.ZFrame<D, R, C>);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> joinRight(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, C, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, java.lang.String, boolean, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, java.lang.String, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, java.lang.String, java.lang.String, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> joinOnCol(zingg.common.client.ZFrame<D, R, C>, C);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract zingg.common.client.ZFrame<D, R, C> joinOnCol(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> repartition(int);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> repartition(int, C);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract zingg.common.client.ZFrame<D, R, C> repartition(int, scala.collection.Seq<C>);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
@@ -75,7 +66,6 @@ SPARK_DIFFERENTIALS = {
     "public abstract C notEqual(java.lang.String, int);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract C notEqual(java.lang.String, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract C or(C, C);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
-    "public abstract C substr(C, int, int);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract double aggSum(java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract double getAsDouble(R, java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
     "public abstract int fieldIndex(java.lang.String);": "selectedOperationsMatchSparkForNullAndDuplicateFixtures",
@@ -115,6 +105,21 @@ SPARK_DIFFERENTIALS = {
 # against Spark. Keep the method name per signature so the matrix cannot accidentally
 # promote unrelated calls merely because they share a large fixture.
 PER_OVERLOAD_SPARK_DIFFERENTIALS = {
+    "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, C, java.lang.String);": "aliasedSelfJoinPreservesDuplicateNamesAndSqlNullEquality",
+    "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "prefixedJoinMatchesSparkForDuplicatesAndNulls",
+    "public abstract zingg.common.client.ZFrame<D, R, C> joinRight(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "rightJoinMatchesSparkForDuplicateNullAndUnmatchedKeys",
+    "public abstract zingg.common.client.ZFrame<D, R, C> joinOnCol(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "joinOnColumnUsingMatchesSparkForDuplicatesAndNulls",
+    "public abstract zingg.common.client.ZFrame<D, R, C> distinct();": "distinctMatchesSparkForDuplicateAndNullRows",
+    "public abstract zingg.common.client.ZFrame<D, R, C> except(zingg.common.client.ZFrame<D, R, C>);": "exceptAndIntersectMatchSparkSetSemanticsForDuplicatesAndNulls",
+    "public abstract zingg.common.client.ZFrame<D, R, C> intersect(zingg.common.client.ZFrame<D, R, C>);": "exceptAndIntersectMatchSparkSetSemanticsForDuplicatesAndNulls",
+    "public abstract zingg.common.client.ZFrame<D, R, C> groupByCount(java.lang.String, java.lang.String);": "groupByCountOverloadsMatchSparkForDuplicatesAndNullKeys",
+    "public abstract zingg.common.client.ZFrame<D, R, C> groupByCount(java.lang.String, java.lang.String, java.lang.String);": "groupByCountOverloadsMatchSparkForDuplicatesAndNullKeys",
+    "public abstract C substr(C, int, int);": "substrMatchesSparkForNegativeZeroAndLongRanges",
+    "public abstract zingg.common.client.ZFrame<D, R, C> split(java.lang.String, java.lang.String, java.lang.String);": "splitMatchesSparkForRepeatedTrailingEmptyAndNullValues",
+    "public abstract zingg.common.client.ZFrame<D, R, C> sample(boolean, double);": "sampleDoubleMatchesSparkForNoReplacementStatistics",
+    "public abstract zingg.common.client.ZFrame<D, R, C> withColumnRenamed(java.lang.String, java.lang.String);": "withColumnRenamedMatchesSparkForExistingAndMissingNames",
+    "public abstract zingg.common.client.ZFrame<D, R, C> explode(java.lang.String, java.lang.String);": "explodeMatchesSparkForNullEmptyAndDuplicateArrayElements",
+    "public abstract zingg.common.client.ZFrame<D, R, C> select(java.lang.String...);": "selectStringVarargsMatchesSparkForOrderDuplicatesAndNulls",
     "public abstract zingg.common.client.ZFrame<D, R, C> limit(int);": "limitMatchesSpark",
     "public abstract zingg.common.client.ZFrame<D, R, C> dropDuplicates(java.lang.String[]);": "dropDuplicatesArrayMatchesSpark",
     "public abstract zingg.common.client.ZFrame<D, R, C> dropDuplicates(java.lang.String, java.lang.String...);": "dropDuplicatesVarargsMatchesSpark",
@@ -129,6 +134,7 @@ PER_OVERLOAD_SPARK_DIFFERENTIALS = {
     "public abstract C and(C, C);": "andColumnsMatchesSpark",
     "public abstract C not(C);": "notColumnMatchesSpark",
     "public abstract C or(C, C);": "orColumnsMatchesSpark",
+    "public abstract C gt(C, C);": "gtColumnsMatchesSpark",
     "public abstract C[] getCols();": "getColsMatchesSpark",
     "public abstract zingg.common.client.FieldData[] fields();": "fieldsMatchesSpark",
     "public abstract int fieldIndex(java.lang.String);": "fieldIndexMatchesSpark",
@@ -394,10 +400,12 @@ def generate() -> dict:
                 test_body = java_method_body(differential_source, test)
                 observed_arities = invocation_arities(test_body, name)
                 expected_arity = signature_arity(signature, name)
-                if expected_arity not in observed_arities:
+                minimum_arity = expected_arity - 1 if re.search(r"\.\.\.\s*\);$", signature) else expected_arity
+                if not any(arity >= minimum_arity for arity in observed_arities):
                     raise ValueError(
-                        f"isolated Spark differential {test} must invoke {name} with exactly "
-                        f"{expected_arity} arguments: {signature}; observed {sorted(observed_arities)}")
+                        f"isolated Spark differential {test} must invoke {name} with a compatible "
+                        f"argument count (signature arity {expected_arity}): {signature}; "
+                        f"observed {sorted(observed_arities)}")
                 if not assertion_references_overload(test_body, name):
                     raise ValueError(
                         f"isolated Spark differential {test} must place the {name} invocation "

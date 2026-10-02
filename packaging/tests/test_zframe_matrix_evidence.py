@@ -64,13 +64,18 @@ class ZFrameMatrixEvidenceTest(unittest.TestCase):
         self.assertEqual({2}, MATRIX.invocation_arities(body, "equalTo"))
         self.assertEqual({0}, MATRIX.invocation_arities(body, "show"))
 
+    def test_varargs_signature_accepts_multi_argument_invocation(self):
+        signature = "public abstract Frame select(java.lang.String...);"
+        self.assertRegex(signature, r"\.\.\.\s*\);$")
+        self.assertEqual(1, MATRIX.signature_arity(signature, "select"))
+
     def test_matrix_requires_exact_javac_overload_resolution(self):
         matrix = MATRIX.generate()
         linked = [row for row in matrix["methods"] if row["evidence"]]
         self.assertGreater(len(linked), 0)
         isolated = [row for row in linked
                     if row["adapterDisposition"] == "PER_OVERLOAD_SPARK_DIFFERENTIAL"]
-        self.assertEqual(46, len(isolated))
+        self.assertEqual(62, len(isolated))
         self.assertEqual({"aggSumMatchesSpark", "getMaxValMatchesSpark", "countMatchesSpark",
                           "showSchemaMatchesSpark", "columnsMatchesSpark",
                           "fieldNamesMatchesSpark", "collectFirstColumnMatchesSpark", "isEmptyMatchesSpark",
@@ -91,6 +96,7 @@ class ZFrameMatrixEvidenceTest(unittest.TestCase):
                           "andColumnsMatchesSpark",
                           "notColumnMatchesSpark",
                           "orColumnsMatchesSpark",
+                          "gtColumnsMatchesSpark",
                           "equalToColumnsMatchesSpark",
                           "getColsMatchesSpark",
                           "fieldsMatchesSpark",
@@ -104,6 +110,19 @@ class ZFrameMatrixEvidenceTest(unittest.TestCase):
                           "notEqualIntMatchesSpark",
                           "notEqualColumnToIdentityMatchesSpark",
                           "unionByNameAllowMissingMatchesSpark",
+                          "aliasedSelfJoinPreservesDuplicateNamesAndSqlNullEquality",
+                          "prefixedJoinMatchesSparkForDuplicatesAndNulls",
+                          "rightJoinMatchesSparkForDuplicateNullAndUnmatchedKeys",
+                          "joinOnColumnUsingMatchesSparkForDuplicatesAndNulls",
+                          "distinctMatchesSparkForDuplicateAndNullRows",
+                          "exceptAndIntersectMatchSparkSetSemanticsForDuplicatesAndNulls",
+                          "groupByCountOverloadsMatchSparkForDuplicatesAndNullKeys",
+                          "substrMatchesSparkForNegativeZeroAndLongRanges",
+                          "splitMatchesSparkForRepeatedTrailingEmptyAndNullValues",
+                          "sampleDoubleMatchesSparkForNoReplacementStatistics",
+                          "withColumnRenamedMatchesSparkForExistingAndMissingNames",
+                          "explodeMatchesSparkForNullEmptyAndDuplicateArrayElements",
+                          "selectStringVarargsMatchesSparkForOrderDuplicatesAndNulls",
                           "showNoArgsMatchesSpark", "showBooleanMatchesSpark", "showIntMatchesSpark",
                           "showIntBooleanMatchesSpark"},
                          {row["evidence"]["testMethod"] for row in isolated})

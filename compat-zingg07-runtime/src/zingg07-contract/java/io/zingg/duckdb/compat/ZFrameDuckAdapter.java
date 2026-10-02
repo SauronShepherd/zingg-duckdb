@@ -170,7 +170,14 @@ public final class ZFrameDuckAdapter implements InvocationHandler {
       case "filterNotNullCond" -> wrap(delegate.filter(new DuckExpr(quote((String) a[0]) + " IS NOT NULL")));
       case "filterNullCond" -> wrap(delegate.filter(new DuckExpr(quote((String) a[0]) + " IS NULL")));
       case "countDistinct" -> countDistinct((String) a[0], (String) a[1], (String) a[2]);
-      case "substr" -> DuckZColumn.expression("substring(" + sql(a[0]) + "," + a[1] + "," + a[2] + ")");
+      case "substr" -> {
+        int position = (Integer) a[1];
+        int length = (Integer) a[2];
+        // Spark treats position zero as the first character; DuckDB's
+        // substring is zero-offset here and returns one fewer character.
+        yield DuckZColumn.expression("substring(" + sql(a[0]) + "," + (position == 0 ? 1 : position)
+            + "," + length + ")");
+      }
       case "get" -> row(a[0]).get((String) a[1]);
       case "getCols" -> getColumns();
       default -> throw unsupported(method);
@@ -185,7 +192,10 @@ public final class ZFrameDuckAdapter implements InvocationHandler {
       }
       String[] physical=Arrays.stream(columns).map(this::physicalName).toArray(String[]::new);
       Frame selected=delegate.select(physical);
-      return logicalNames==null?wrap(selected):withLogicalNames(selected,Arrays.asList(columns.clone()));
+      // DuckDB uniquifies repeated projection names with a physical suffix;
+      // Spark preserves the requested names, including duplicates. Keep the
+      // requested positional names at the adapter boundary for both cases.
+      return withLogicalNames(selected,Arrays.asList(columns.clone()));
     }
     if (args[0] instanceof List<?> expressions) {
       if (expressions.isEmpty()) return wrap(delegate.selectZeroColumns());
@@ -237,25 +247,38 @@ public final class ZFrameDuckAdapter implements InvocationHandler {
   }
 
   private Object join(Method method, Object[] args) {
-    Frame right = unwrap(zframe(args[0]));
+    ZFrameDuckAdapter rightAdapter = (ZFrameDuckAdapter) Proxy.getInvocationHandler(zframe(args[0]));
+    Frame right = rightAdapter.delegate;
     if (args.length == 2) {
       String key = (String) args[1];
-      return wrap(delegate.join(right, qualified("l", key) + " = " + qualified("r", ID_PREFIX + key)));
+      return joined(delegate.join(right, qualified("l", key) + " = " + qualified("r", ID_PREFIX + key)),
+          rightAdapter);
     }
     if (args.length == 3 && args[1] instanceof Expression condition) {
-      return wrap(delegate.join(right, condition.sql(), (String) args[2]));
+      return joined(delegate.join(right, condition.sql(), (String) args[2]), rightAdapter);
     }
     if (args.length == 3) {
       String first = (String) args[1], second = (String) args[2];
-      return wrap(delegate.join(right, equality(first, first) + " AND " + equality(second, second)));
+      return joined(delegate.join(right, equality(first, first) + " AND " + equality(second, second)),
+          rightAdapter);
     }
     if (args.length == 4 && args[2] instanceof Boolean addPrefix) {
       String left = (String) args[1];
       String rightColumn = addPrefix ? ID_PREFIX + left : left;
-      return wrap(delegate.join(right, qualified("l", left) + " = " + qualified("r", rightColumn), (String) args[3]));
+      return joined(delegate.join(right, qualified("l", left) + " = " + qualified("r", rightColumn),
+          (String) args[3]), rightAdapter);
     }
     String first = (String) args[1], second = (String) args[2], type = (String) args[3];
-    return wrap(delegate.join(right, equality(first, first) + " AND " + equality(second, second), type));
+    return joined(delegate.join(right, equality(first, first) + " AND " + equality(second, second), type),
+        rightAdapter);
+  }
+
+  private ZFrame<Frame,Row,DuckZColumn> joined(Frame frame, ZFrameDuckAdapter right) {
+    var names = new ArrayList<String>(columns());
+    names.addAll(right.columns());
+    // DuckDB uniquifies duplicate SELECT * names; Spark retains both names for
+    // condition joins. Restore the Spark-visible positional schema logically.
+    return frame.columns().size() == names.size() ? withLogicalNames(frame, names) : wrap(frame);
   }
 
   private Object joinOnColumn(Object[] args) {
@@ -266,7 +289,8 @@ public final class ZFrameDuckAdapter implements InvocationHandler {
 
   private Object joinRight(Object[] args) {
     String key = (String) args[1];
-    return wrap(delegate.join(unwrap(zframe(args[0])), equality(key, key), "right"));
+    ZFrameDuckAdapter right = (ZFrameDuckAdapter) Proxy.getInvocationHandler(zframe(args[0]));
+    return joined(delegate.join(right.delegate, equality(key, key), "right"), right);
   }
 
   private Object dropDuplicates(Method method, Object[] args) {
