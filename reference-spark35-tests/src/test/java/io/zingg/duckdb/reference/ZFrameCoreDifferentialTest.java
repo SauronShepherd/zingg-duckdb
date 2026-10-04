@@ -1309,6 +1309,42 @@ class ZFrameCoreDifferentialTest {
   }
 
   @Test
+  void asStringMatchesSparkForQualifiedSelfJoin(@TempDir Path temp) throws Exception {
+    SparkSession spark = newSparkSession("zframe-as-string-qualified-self-join");
+    try (var runtime = new DuckRuntime(new RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("as-string-qualified-self-join.duckdb"), 1, 0, null, 1));
+         var job = runtime.openJob()) {
+      Dataset<org.apache.spark.sql.Row> sparkBase = spark.sql(
+          "SELECT 'p' AS group_key, 'left' AS payload UNION ALL SELECT 'p', 'right'");
+      ZFrame<Frame, Row, DuckZColumn> duckBase = ZFrameDuckAdapter.wrap(job.sql(
+          "SELECT 'p' AS group_key, 'left' AS payload UNION ALL SELECT 'p', 'right'"));
+
+      assertEquals(List.of(sparkBase.as("comparison_alias").columns()),
+          List.of(duckBase.as("comparison_alias").columns()));
+      assertEquals(indexSparkRows(sparkBase.as("comparison_alias").collectAsList()),
+          indexDuckRows(duckBase.as("comparison_alias").collectAsList()));
+
+      Dataset<org.apache.spark.sql.Row> sparkLeft = sparkBase.as("left_records");
+      Dataset<org.apache.spark.sql.Row> sparkRight = sparkBase.as("right_records");
+      Dataset<org.apache.spark.sql.Row> sparkJoined = sparkLeft.join(sparkRight,
+          sparkLeft.col("group_key").equalTo(sparkRight.col("group_key")), "inner");
+      ZFrame<Frame, Row, DuckZColumn> duckLeft = duckBase.as("left_records");
+      ZFrame<Frame, Row, DuckZColumn> duckRight = duckBase.as("right_records");
+      DuckZColumn condition = duckLeft.equalTo(
+          duckLeft.col("group_key"), duckRight.col("group_key"));
+      ZFrame<Frame, Row, DuckZColumn> duckJoined = duckLeft.join(duckRight, condition, "inner");
+
+      assertEquals(List.of(sparkJoined.columns()), List.of(duckJoined.columns()));
+      assertEquals(indexSparkRows(sparkJoined.collectAsList()), indexDuckRows(duckJoined.collectAsList()),
+          "separate as(String) aliases must retain independent qualified column references");
+      assertEquals(4L, sparkJoined.count(), "duplicate keys produce the full many-to-many self-join");
+      assertEquals(sparkJoined.count(), duckJoined.count());
+    } finally {
+      spark.stop();
+    }
+  }
+
+  @Test
   void prefixedJoinMatchesSparkForDuplicatesAndNulls(@TempDir Path temp) throws Exception {
     SparkSession spark = newSparkSession("zframe-prefixed-join-duplicates-nulls");
     try (var runtime = new DuckRuntime(new RuntimeConfig(
@@ -1416,6 +1452,46 @@ class ZFrameCoreDifferentialTest {
           "USING join preserves duplicate-key Cartesian matches and excludes NULL-key pairs");
       assertEquals(4L, sparkJoined.count(), "two duplicate a keys on each side produce four matches");
       assertEquals(sparkJoined.count(), duckLeft.joinOnCol(duckRight, "join_key").count());
+    } finally {
+      spark.stop();
+    }
+  }
+
+  @Test
+  void joinOnColumnExpressionPreservesSparkDuplicateNames(@TempDir Path temp) throws Exception {
+    SparkSession spark = newSparkSession("zframe-join-on-column-expression-duplicate-names");
+    try (var runtime = new DuckRuntime(new RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("join-on-column-expression.duckdb"), 1, 0, null, 1));
+         var job = runtime.openJob()) {
+      Dataset<org.apache.spark.sql.Row> sparkLeft = spark.sql(
+          "SELECT 'a' AS join_key, 'L1' AS left_payload "
+              + "UNION ALL SELECT 'a', 'L2' UNION ALL SELECT 'b', 'L3' "
+              + "UNION ALL SELECT CAST(NULL AS STRING), 'LN'");
+      Dataset<org.apache.spark.sql.Row> sparkRight = spark.sql(
+          "SELECT 'a' AS join_key, 'R1' AS right_payload "
+              + "UNION ALL SELECT 'a', 'R2' UNION ALL SELECT 'c', 'R3' "
+              + "UNION ALL SELECT CAST(NULL AS STRING), 'RN'");
+      ZFrame<Frame, Row, DuckZColumn> duckLeft = ZFrameDuckAdapter.wrap(job.sql(
+          "SELECT 'a' AS join_key, 'L1' AS left_payload "
+              + "UNION ALL SELECT 'a', 'L2' UNION ALL SELECT 'b', 'L3' "
+              + "UNION ALL SELECT CAST(NULL AS VARCHAR), 'LN'"));
+      ZFrame<Frame, Row, DuckZColumn> duckRight = ZFrameDuckAdapter.wrap(job.sql(
+          "SELECT 'a' AS join_key, 'R1' AS right_payload "
+              + "UNION ALL SELECT 'a', 'R2' UNION ALL SELECT 'c', 'R3' "
+              + "UNION ALL SELECT CAST(NULL AS VARCHAR), 'RN'"));
+      Dataset<org.apache.spark.sql.Row> sparkJoined = sparkLeft.join(sparkRight,
+          sparkLeft.col("join_key").equalTo(sparkRight.col("join_key")));
+      ZFrame<Frame, Row, DuckZColumn> duckJoined = duckLeft.joinOnCol(duckRight,
+          duckLeft.equalTo(duckLeft.col("join_key"), duckRight.col("join_key")));
+      assertEquals(List.of(sparkJoined.columns()), List.of(duckLeft.joinOnCol(duckRight,
+          duckLeft.equalTo(duckLeft.col("join_key"), duckRight.col("join_key"))).columns()),
+          "expression join preserves both duplicate Spark-visible key names");
+      assertEquals(indexSparkRows(sparkJoined.collectAsList()), indexDuckRows(duckLeft.joinOnCol(duckRight,
+          duckLeft.equalTo(duckLeft.col("join_key"), duckRight.col("join_key"))).collectAsList()),
+          "expression join preserves Spark row values and duplicate-key multiplicity");
+      assertEquals(4L, sparkJoined.count(), "duplicate keys produce four matches and NULL keys do not match");
+      assertEquals(sparkJoined.count(), duckLeft.joinOnCol(duckRight,
+          duckLeft.equalTo(duckLeft.col("join_key"), duckRight.col("join_key"))).count());
     } finally {
       spark.stop();
     }

@@ -11,9 +11,10 @@ import java.util.stream.Collectors;
 /** Writes the neutral linear-classifier payload consumed by ModelScorerRegistry. */
 public final class NativeClassifierArtifact {
   public record Config(String profile,List<String> features,double[] weights,double intercept,boolean logistic,Path output,
-      double threshold,List<String> assemblerInputCols,int polynomialDegree) {
+      double threshold,List<String> assemblerInputCols,int polynomialDegree,long maxArtifactBytes) {
     public Config {
       if(profile==null||profile.isBlank()||output==null) throw new IllegalArgumentException("profile and output are required");
+      if(maxArtifactBytes<0) throw new IllegalArgumentException("maxArtifactBytes cannot be negative");
       features=List.copyOf(features==null?List.of():features); weights=weights==null?new double[0]:weights.clone();
       if(features.isEmpty()||features.size()!=weights.length) throw new IllegalArgumentException("classifier feature/weight dimensions differ");
       if(features.stream().anyMatch(f->f==null||f.isBlank())) throw new IllegalArgumentException("classifier feature is blank");
@@ -30,6 +31,10 @@ public final class NativeClassifierArtifact {
         throw new IllegalArgumentException("classifier polynomial feature dimensions differ");
       }
     }
+    public Config(String profile,List<String> features,double[] weights,double intercept,boolean logistic,Path output,
+        double threshold,List<String> assemblerInputCols,int polynomialDegree) {
+      this(profile,features,weights,intercept,logistic,output,threshold,assemblerInputCols,polynomialDegree,0);
+    }
     @Override public double[] weights(){return weights.clone();}
     public Config(String profile,List<String> features,double[] weights,double intercept,boolean logistic,Path output){this(profile,features,weights,intercept,logistic,output,0.5,List.of(),0);}
   }
@@ -45,8 +50,15 @@ public final class NativeClassifierArtifact {
       var cancellation = DuckCancellation.current();
       new ModelArtifactWriter(config.output().toAbsolutePath().normalize(),
           cancellation == null ? () -> false : cancellation::isCancelled)
-          .write(manifest,payload.getBytes(StandardCharsets.UTF_8),provenance);
+          .write(manifest,payload.getBytes(StandardCharsets.UTF_8),provenance,
+              config.maxArtifactBytes());
       return config.output().toAbsolutePath().normalize();
-    } catch(Exception e) { if(e instanceof DuckException d) throw d; throw new DuckException("classifier artifact write failed",e); }
+    } catch(Exception e) {
+      if(e instanceof DuckException d) throw d;
+      if(e instanceof java.io.IOException io && io.getMessage()!=null
+          && io.getMessage().startsWith("model artifact byte budget exceeded:"))
+        throw new DuckException(io.getMessage(),io);
+      throw new DuckException("classifier artifact write failed",e);
+    }
   }
 }

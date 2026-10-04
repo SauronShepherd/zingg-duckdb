@@ -68,6 +68,19 @@ public final class DuckJob implements JobHandle {
 
   ResourceBudget budget() { return budget; }
 
+  java.nio.file.Path tempDirectory() {
+    try (var statement = connection.createStatement();
+         var result = statement.executeQuery("SELECT current_setting('temp_directory')")) {
+      if (!result.next()) throw new SQLException("DuckDB did not return temp_directory");
+      String configured = result.getString(1);
+      String path = configured == null || configured.isBlank()
+          ? System.getProperty("java.io.tmpdir") : configured;
+      return java.nio.file.Path.of(path).toAbsolutePath().normalize();
+    } catch (SQLException | java.nio.file.InvalidPathException e) {
+      throw new DuckException("cannot resolve DuckDB temp_directory for input snapshots", e);
+    }
+  }
+
   void registerMaterialized(String name) { materializedTables.add(name); }
 
   void dropMaterialized(String name) throws SQLException {

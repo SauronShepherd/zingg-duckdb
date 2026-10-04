@@ -366,6 +366,31 @@ class PersistentLabelDecisionProviderTest {
   }
 
   @Test
+  void appliedLabelMutationsUseAppendOnlyJournalUntilQueueSnapshotCompaction(@TempDir Path temp)
+      throws Exception {
+    Path labels = temp.resolve("journal-labels");
+    var provider = new PersistentLabelDecisionProvider(labels);
+    provider.applyLabels(new LabelDecisionProvider.ApplyLabelsRequest("one", "v1", "one",
+        List.of(new LabelDecisionProvider.LabelDecision("a", "b",
+            LabelDecisionProvider.Decision.MATCH, "human"))));
+    byte[] bootstrap = Files.readAllBytes(labels.resolve("labels.bin"));
+    provider.applyLabels(new LabelDecisionProvider.ApplyLabelsRequest("two", "v1", "two",
+        List.of(new LabelDecisionProvider.LabelDecision("c", "d",
+            LabelDecisionProvider.Decision.NON_MATCH, "human"))));
+
+    assertArrayEquals(bootstrap, Files.readAllBytes(labels.resolve("labels.bin")),
+        "applied-label append must not rewrite the cumulative snapshot");
+    assertTrue(Files.size(labels.resolve("labels.applied.log")) > 0,
+        "applied-label delta must be durable in the append-only journal");
+    assertEquals(2, new PersistentLabelDecisionProvider(labels).acceptedDecisions().size());
+
+    provider.enqueue(new LabelDecisionProvider.PendingLabel("pending-left", "pending-right", null, null));
+    assertEquals(0, Files.size(labels.resolve("labels.applied.log")),
+        "a queue snapshot is a safe compaction point for applied deltas");
+    assertEquals(2, new PersistentLabelDecisionProvider(labels).acceptedDecisions().size());
+  }
+
+  @Test
   void distinctNulBearingPairKeysSurviveSnapshotAndRecovery(@TempDir Path temp) {
     Path labels = temp.resolve("nul-pair-labels");
     var first = new LabelDecisionProvider.LabelDecision("a\u0000b", "c",

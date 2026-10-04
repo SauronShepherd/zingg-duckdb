@@ -21,13 +21,19 @@ public final class Matcher {
     List<String> inputFeatures=classifier.baseFeatures().isEmpty()?classifier.features():classifier.baseFeatures();
     for(String feature:inputFeatures)if(!candidates.columns().contains(feature))throw new DuckException("classifier feature is not present in candidates: "+feature);
     var terms=new java.util.ArrayList<String>(); double[] weights=classifier.weights();
-    List<String> expanded=classifier.baseFeatures().isEmpty()?classifier.features():PolynomialFeatures.sqlTerms(classifier.baseFeatures(),classifier.polynomialDegree());
+    List<String> expanded=classifier.baseFeatures().isEmpty()
+        ?classifier.features().stream().map(Matcher::quote).toList()
+        :PolynomialFeatures.sqlTerms(classifier.baseFeatures(),classifier.polynomialDegree());
     if(expanded.size()!=weights.length)throw new DuckException("classifier expanded feature dimensions differ");
     for(int i=0;i<weights.length;i++)terms.add("("+weights[i]+" * "+expanded.get(i)+")");
-    String z=classifier.intercept()+(terms.isEmpty()?"":" + "+String.join(" + ",terms));
+    // Keep the generated expression shallow: imported Spark models can have
+    // thousands of polynomial terms, and a left-deep addition tree can exhaust
+    // the DuckDB parser/native stack. LIST_SUM over one LIST_VALUE remains flat.
+    String z="list_sum(list_value("+classifier.intercept()
+        +(terms.isEmpty()?"":", "+String.join(", ",terms))+"))";
     String expression=classifier.logistic()?"(1.0 / (1.0 + exp(-("+z+"))))":"("+z+")";
     double threshold=classifier.threshold();
-    var scored=candidates.withColumn("z_score",new io.zingg.duckdb.engine.DuckExpr(expression));
+    var scored=candidates.withColumn("z_score",new io.zingg.duckdb.engine.ValidatedModelExpression(expression));
     return scored.withColumn("z_prediction",new io.zingg.duckdb.engine.DuckExpr("CASE WHEN z_score >= "+threshold+" THEN 1 ELSE 0 END"))
         .filter(new io.zingg.duckdb.engine.DuckExpr("z_prediction = 1"));
   }

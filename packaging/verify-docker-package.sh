@@ -21,8 +21,10 @@ PYTHON_IMAGE=${DOCKER_TEST_PYTHON_IMAGE:-python:3.12-slim}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)
 TEST_CLASSES="$REPO_ROOT/runtime-worker/target/test-classes"
-if [ ! -f "$TEST_CLASSES/io/zingg/duckdb/worker/ArrowCancellationFixture.class" ]; then
-  echo "Arrow cancellation fixture is missing; compile test classes before Docker validation" >&2
+if [ ! -f "$TEST_CLASSES/io/zingg/duckdb/worker/ArrowCancellationFixture.class" ] \
+    || [ ! -f "$TEST_CLASSES/io/zingg/duckdb/worker/SpillQuotaProbe.class" ] \
+    || [ ! -f "$TEST_CLASSES/io/zingg/duckdb/worker/OfflineNetworkProbe.class" ]; then
+  echo "Docker package validation fixtures are missing; compile test classes before Docker validation" >&2
   exit 2
 fi
 case "$DOCKER" in
@@ -40,7 +42,9 @@ esac
   --network none \
   --read-only \
   --tmpfs /tmp:rw,nosuid,nodev,exec,size=256m \
+  --tmpfs /zingg-spill:rw,nosuid,nodev,size=16m \
   --mount "type=bind,source=$BUNDLE_SOURCE,target=/opt/zingg,readonly" \
+  --mount "type=bind,source=$TEST_CLASSES_SOURCE,target=/opt/zingg-test-classes,readonly" \
   "$IMAGE" /bin/sh -eu -c '
     test -x /opt/zingg/bin/zingg-duckdb.sh
     test -x /opt/zingg/runtime/java/bin/java
@@ -52,6 +56,31 @@ esac
       printf "unexpected packaged worker response:\n%s\n" "$actual" >&2
       exit 1
     fi
+    network_probe=$(/opt/zingg/runtime/java/bin/java \
+      --add-opens=java.base/java.nio=ALL-UNNAMED \
+      --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+      -cp /opt/zingg/worker/runtime-worker-0.1.0-SNAPSHOT.jar:/opt/zingg-test-classes \
+      io.zingg.duckdb.worker.OfflineNetworkProbe /tmp/zingg-offline-network-probe)
+    case "$network_probe" in
+      *OFFLINE_NETWORK_AND_DUCKDB_URL_REJECTED*) printf "%s\n" "$network_probe" ;;
+      *) printf "offline network probe failed:\n%s\n" "$network_probe" >&2; exit 1 ;;
+    esac
+    spill_status=$(printf "spill-status\tstatus\t\nspill-stop\tshutdown\t\n" |
+      env PATH=/usr/bin:/bin /opt/zingg/bin/zingg-duckdb.sh \
+        --temp-directory /zingg-spill --max-temp-bytes 1048576)
+    case "$spill_status" in
+      *"temp_directory=/zingg-spill;"*) ;;
+      *) printf "worker did not use the bounded spill mount:\n%s\n" "$spill_status" >&2; exit 1 ;;
+    esac
+    quota_probe=$(/opt/zingg/runtime/java/bin/java \
+      --add-opens=java.base/java.nio=ALL-UNNAMED \
+      --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+      -cp /opt/zingg/worker/runtime-worker-0.1.0-SNAPSHOT.jar:/opt/zingg-test-classes \
+      io.zingg.duckdb.worker.SpillQuotaProbe /zingg-spill)
+    case "$quota_probe" in
+      *SPILL_TMPFS_QUOTA_REJECTED_AND_CLEANED*MODEL_ARTIFACT_BUDGET_REJECTED_AND_CLEANED*CONCURRENT_SPILL_QUOTA_REJECTED_AND_CLEANED*) printf "%s\n" "$quota_probe" ;;
+      *) printf "spill quota probe failed:\n%s\n" "$quota_probe" >&2; exit 1 ;;
+    esac
   '
 
 "$DOCKER" image inspect "$IMAGE" --format='DOCKER_TEST_IMAGE_ID={{.Id}} REPO_DIGESTS={{json .RepoDigests}}'

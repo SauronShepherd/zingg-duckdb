@@ -3,6 +3,8 @@ package io.zingg.duckdb.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.zingg.duckdb.api.DuckException;
 import io.zingg.duckdb.api.Frame;
@@ -17,6 +19,45 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class DuckRuntimeOwnershipTest {
+  @Test
+  void runtimeDisablesImplicitExtensionResolutionAndLocksConfiguration(@TempDir Path temp)
+      throws Exception {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("offline-policy.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config); var job = (DuckJob) runtime.openJob()) {
+      try (var statement = job.connection().createStatement();
+           var settings = statement.executeQuery("SELECT current_setting('autoinstall_known_extensions'), "
+               + "current_setting('autoload_known_extensions'), current_setting('allow_community_extensions'), "
+               + "current_setting('enable_external_access')")) {
+        assertTrue(settings.next());
+        assertEquals("false", settings.getString(1));
+        assertEquals("false", settings.getString(2));
+        assertEquals("false", settings.getString(3));
+        assertEquals("false", settings.getString(4));
+      }
+      DuckException networkRead = assertThrows(DuckException.class,
+          () -> job.sql("SELECT * FROM read_csv('https://example.invalid/never-fetch.csv')").count());
+      var sqlFailure = assertInstanceOf(java.sql.SQLException.class, networkRead.getCause(),
+          "offline URL denial must retain DuckDB's structured SQL failure");
+      assertTrue(sqlFailure.getMessage() != null && !sqlFailure.getMessage().isBlank(),
+          "offline URL denial must include actionable engine detail: " + sqlFailure);
+      Path localCsv = temp.resolve("local-offline.csv");
+      java.nio.file.Files.writeString(localCsv, "value\nlocal\n");
+      assertEquals(1, job.sql("SELECT * FROM read_csv(" + DuckPath.sqlLiteral(localCsv) + ")").count(),
+          "offline mode must retain the explicitly allowed local-file data path");
+      assertThrows(java.sql.SQLException.class, () -> {
+        try (var statement = job.connection().createStatement()) {
+          statement.execute("SET autoload_known_extensions=true");
+        }
+      });
+    }
+    var overriddenUrl = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("offline-policy-override.duckdb") + ";enable_external_access=true",
+        1, 0, null, 1);
+    assertThrows(DuckException.class, () -> new DuckRuntime(overriddenUrl),
+        "a JDBC URL option must not override offline-mode security settings");
+  }
+
   @Test
   void jobsHaveIndependentTemporaryStateAndRejectCrossOwnerJoin(@TempDir Path temp) throws Exception {
     var config = new io.zingg.duckdb.api.RuntimeConfig(
@@ -50,6 +91,52 @@ class DuckRuntimeOwnershipTest {
     } finally {
       executor.shutdownNow();
       executor.awaitTermination(5, TimeUnit.SECONDS);
+    }
+  }
+
+  @Test
+  void repeatedJobCloseReleasesExactlyOneConnectionSlot(@TempDir Path temp) throws Exception {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("repeated-close.duckdb"), 2, 0, null, 1);
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try (var runtime = new DuckRuntime(config)) {
+      JobHandle first = runtime.openJob();
+      first.close();
+      first.close();
+
+      try (var second = runtime.openJob()) {
+        assertEquals(1, second.sql("select 1").count());
+        Future<JobHandle> thirdFuture = executor.submit(() -> runtime.openJob());
+        Thread.sleep(150);
+        assertEquals(false, thirdFuture.isDone(),
+            "closing one job twice must not release two concurrency permits");
+        second.close();
+        try (var third = thirdFuture.get(5, TimeUnit.SECONDS)) {
+          assertEquals(1, third.sql("select 1").count());
+        }
+      }
+    } finally {
+      executor.shutdownNow();
+      executor.awaitTermination(5, TimeUnit.SECONDS);
+    }
+  }
+
+  @Test
+  void failedReadOnlyJobConstructionReturnsTheOnlyJobSlot(@TempDir Path temp) {
+    Path database = temp.resolve("read-only-job.duckdb");
+    var writable = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + database, 1, 0, null, 1);
+    try (var ignored = new DuckRuntime(writable)) {
+      // Opening the runtime creates the database before the read-only attempt.
+    }
+    var readOnly = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + database + ";access_mode=READ_ONLY", 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(readOnly)) {
+      for (int attempt = 0; attempt < 2; attempt++) {
+        assertTimeoutPreemptively(Duration.ofSeconds(2),
+            () -> assertThrows(DuckException.class, runtime::openJob),
+            "a failed job constructor must not strand the sole concurrency permit");
+      }
     }
   }
 

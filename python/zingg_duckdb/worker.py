@@ -58,7 +58,7 @@ class DuckWorker:
               blocking_column: str, max_rows: int = 1_000_000) -> str:
         inputs = input_path if isinstance(input_path, list) else [input_path]
         payload = _payload("", artifact_path, blocking_expression, blocking_column, str(max_rows), *inputs)
-        return self.client.request("train " + payload)
+        return self.client.request("train_blocking " + payload)
     def train_classifier(self, input_path: str | list[str], artifact_path: str, label_column: str,
                          features: list[str], max_rows: int = 1_000_000, iterations: int = 200,
                          learning_rate: float = 0.05, l2: float = 1e-4,
@@ -66,7 +66,7 @@ class DuckWorker:
         inputs = input_path if isinstance(input_path, list) else [input_path]
         payload = _payload("", artifact_path, label_column, ",".join(features), str(max_rows),
                            str(iterations), str(learning_rate), str(l2), profile, *inputs)
-        return self.client.request("train " + payload)
+        return self.client.request("train_classifier " + payload)
     def train_from_labels(self, input_path: str | list[str], artifact_path: str,
                           id_column: str, blocking_column: str, features: list[str],
                           label_column: str = "z_label", max_rows: int = 1_000_000,

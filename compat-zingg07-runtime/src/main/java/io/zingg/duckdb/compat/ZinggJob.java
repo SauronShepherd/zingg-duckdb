@@ -9,7 +9,8 @@ import java.util.*;
 public final class ZinggJob implements AutoCloseable {
   public enum Phase { FIND_TRAINING_DATA, TRAIN, MATCH, LINK }
   private final CompatibilityRuntime runtime; private final JobHandle job;
-  public ZinggJob(CompatibilityRuntime runtime){this.runtime=Objects.requireNonNull(runtime);this.job=runtime.openJob();}
+  public ZinggJob(CompatibilityRuntime runtime){this(runtime,null);}
+  ZinggJob(CompatibilityRuntime runtime,ResourceBudget budget){this.runtime=Objects.requireNonNull(runtime);this.job=budget==null?runtime.openJob():runtime.openJob(budget);}
   public Frame read(List<Path> inputs,Phase phase){return read(inputs,phase,null);}
   public Frame read(List<Path> inputs,Phase phase,io.zingg.duckdb.api.PathPolicy policy){
     var mode=phase==Phase.MATCH||phase==Phase.LINK
@@ -22,8 +23,14 @@ public final class ZinggJob implements AutoCloseable {
   public Frame trainingData(Frame input,TrainingPlan.Config config){return new TrainingPlan().prepare(input,config);}
   public NativeTrainingService.Result trainNative(Frame input,NativeTrainingConfig config){return new NativeTrainingService().train(input,config);}
   public NativeClassifierTrainer.Result trainClassifier(Frame input,NativeClassifierTrainer.Config config){return new NativeClassifierTrainer().train(input,config);}
+  public NativeClassifierTrainer.TrainingDiagnostics trainClassifierWithDiagnostics(
+      Frame input,NativeClassifierTrainer.Config config){return new NativeClassifierTrainer().trainWithDiagnostics(input,config);}
   public List<GraphOutput.EntityScore> graphEntities(Collection<GraphOutput.Edge> edges){return GraphOutput.entityScores(edges,runtime.clock());}
   public List<GraphOutput.Edge> transitiveGraphEdges(Collection<GraphOutput.Edge> edges){return GraphOutput.transitiveEdges(edges);}
+  public List<GraphOutput.Edge> transitiveGraphEdges(
+      Collection<GraphOutput.Edge> edges,long maxOutputPairs,CancellationToken cancellation){
+    return GraphOutput.transitiveEdges(edges,maxOutputPairs,cancellation);
+  }
   public Object hash(String function,String value){return runtime.hashes().apply(function,value);}
   public double similarity(String function,String left,String right){return runtime.similarities().apply(function,left,right);}
   public LabelDecisionProvider.LabelBatch getPendingLabels(LabelDecisionProvider.LabelRequest request){return runtime.labels().getPendingLabels(request);}

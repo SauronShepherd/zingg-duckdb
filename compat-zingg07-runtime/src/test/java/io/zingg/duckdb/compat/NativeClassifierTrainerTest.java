@@ -25,9 +25,9 @@ class NativeClassifierTrainerTest {
       var config = new NativeClassifierTrainer.Config("test-profile", List.of("feature"), "label",
           artifact, 1_000_000, 0.05, 1e-4, 2_000);
       var cancellation = new DuckCancellation();
-      // The input is small enough to count/collect quickly, but one million
-      // full-batch iterations cannot finish before this timer. This therefore
-      // exercises cancellation inside the CPU training loop, not only JDBC IO.
+      // The input snapshot/validation is small, but one million full-batch SQL
+      // gradient iterations cannot finish before this timer. This exercises
+      // cancellation during iterative fitting rather than just setup.
       cancellation.cancelAfter(Duration.ofSeconds(5));
       try (var ignored = DuckCancellation.install(cancellation)) {
         DuckException failure = assertThrows(DuckException.class,
@@ -59,6 +59,51 @@ class NativeClassifierTrainerTest {
   }
 
   @Test
+  void collectByteBudgetDuringTrainingPreventsArtifactPublicationAndKeepsRuntimeUsable(@TempDir Path temp)
+      throws Exception {
+    var config = new RuntimeConfig("jdbc:duckdb:" + temp.resolve("collect-budget-training.duckdb"), 1, 0, null, 1);
+    var budget = new io.zingg.duckdb.engine.ResourceBudget(0, 0, 0, 0, 13, 0);
+    try (var runtime = new CompatibilityRuntime(config, null,
+             "zingg-0.7.0-duckdb-1.5.5.1", budget);
+         var job = new ZinggJob(runtime)) {
+      var input = job.sql("SELECT * FROM (VALUES (-1.0, 0), (1.0, 1)) AS t(feature, label)");
+      Path artifact = temp.resolve("collect-budget-model");
+      DuckException failure = assertThrows(DuckException.class,
+          () -> new NativeClassifierTrainer().train(input, config(artifact, List.of("feature"), 2)));
+
+      assertTrue(failure.getMessage().startsWith("collect byte budget exceeded:"), failure.toString());
+      assertTrue(Files.notExists(artifact), "collect-budget failure must happen before model publication");
+      try (var entries = Files.list(temp)) {
+        assertTrue(entries.noneMatch(path -> path.getFileName().toString().startsWith(".model-artifact-")),
+            "collect-budget failure must not leave model staging artifacts");
+      }
+      assertEquals(1L, job.sql("SELECT 1 AS value").count(),
+          "cancelling the over-budget aggregate must leave the runtime usable");
+    }
+  }
+
+  @Test
+  void rejectsModelArtifactOverOutputBudgetBeforeStaging(@TempDir Path temp) throws Exception {
+    try (var runtime = runtime(temp); var job = new ZinggJob(runtime)) {
+      var input = job.sql("SELECT * FROM (VALUES (-1.0, 0), (1.0, 1)) AS t(feature, label)");
+      Path artifact = temp.resolve("output-budget-model");
+      var config = new NativeClassifierTrainer.Config("test-profile", List.of("feature"), "label",
+          artifact, 1, 0.05, 0.0, 2, 1);
+
+      DuckException failure = assertThrows(DuckException.class,
+          () -> new NativeClassifierTrainer().train(input, config));
+
+      assertTrue(failure.getMessage().startsWith("model artifact byte budget exceeded:"),
+          failure.toString());
+      assertTrue(Files.notExists(artifact));
+      try (var entries = Files.list(temp)) {
+        assertTrue(entries.noneMatch(path -> path.getFileName().toString().startsWith(".model-artifact-")),
+            "output-budget rejection must not leave an artifact stage");
+      }
+    }
+  }
+
+  @Test
   void rejectsSingleClassLabelsBeforePublishingArtifact(@TempDir Path temp) {
     try (var runtime = runtime(temp); var job = new ZinggJob(runtime)) {
       var input = job.sql("SELECT * FROM (VALUES (0.0, 1), (1.0, 1)) AS t(feature, label)");
@@ -80,6 +125,34 @@ class NativeClassifierTrainerTest {
       exposed[0] = original + 1000;
       assertEquals(original, result.weights()[0]);
       assertEquals(2, result.rows());
+    }
+  }
+
+  @Test
+  void computesFullBatchGradientInsideDuckDb(@TempDir Path temp) {
+    try (var runtime = runtime(temp); var job = new ZinggJob(runtime)) {
+      var input = job.sql("SELECT * FROM (VALUES (-1.0, 0), (1.0, 1)) AS t(feature, label)");
+      var config = new NativeClassifierTrainer.Config("test-profile", List.of("feature"), "label",
+          temp.resolve("sql-gradient-model"), 1, 0.05, 0.0, 2);
+      var result = new NativeClassifierTrainer().train(input, config);
+      assertEquals(0.025, result.weights()[0], 1e-12);
+      assertEquals(0.0, result.intercept(), 1e-12);
+      assertEquals(2, result.rows());
+    }
+  }
+
+  @Test
+  void diagnosticTrainingCapturesPhysicalPlanForFirstGradientAggregate(@TempDir Path temp) {
+    try (var runtime = runtime(temp); var job = new ZinggJob(runtime)) {
+      var input = job.sql("SELECT * FROM (VALUES (-1.0, 0), (1.0, 1)) AS t(feature, label)");
+      var diagnostics = job.trainClassifierWithDiagnostics(input,
+          new NativeClassifierTrainer.Config("test-profile", List.of("feature"), "label",
+              temp.resolve("diagnostic-model"), 1, 0.05, 0, 2));
+
+      assertEquals(2, diagnostics.result().rows());
+      assertTrue(diagnostics.firstGradientPhysicalPlan().toUpperCase(java.util.Locale.ROOT)
+          .contains("AGGREGATE"), diagnostics.firstGradientPhysicalPlan());
+      assertTrue(Files.isDirectory(diagnostics.result().artifactDirectory()));
     }
   }
 

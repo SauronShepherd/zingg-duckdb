@@ -164,6 +164,133 @@ class Zingg07FixtureIntakeTest {
   }
 
   @Test
+  void sparkClassifierImporterPreservesNonDefaultThresholdAndRejectsInvalidValues() throws Exception {
+    Path fixture = Files.createTempDirectory("zingg07-threshold-");
+    try {
+      copyFixture(fixture);
+      Path metadata = fixture.resolve(
+          "classifier/best.model/bestModel/stages/2_logreg_a0b6b01da133/metadata/part-00000");
+      String original = Files.readString(metadata);
+      assertTrue(original.contains("\"threshold\":0.4"));
+      Files.writeString(metadata, original.replace("\"threshold\":0.4", "\"threshold\":0.73"));
+
+      Path imported = fixture.resolve("non-default-threshold.model");
+      new SparkMlClassifierImporter().importModel(fixture, "zingg-0.7.0", imported);
+      var scorer = (LinearClassifier) new ModelScorerRegistry().create(
+          io.zingg.duckdb.model.ModelReader.load(imported, 64L * 1024 * 1024));
+      assertEquals(0.73d, scorer.threshold());
+      assertEquals(1329, scorer.weights().length);
+
+      var featureColumns = java.util.stream.IntStream.range(0, 18)
+          .mapToObj(index -> "z_sim" + index).toList();
+      var recordsCsv = new StringBuilder("id,block,").append(String.join(",", featureColumns)).append('\n');
+      recordsCsv.append("1,same-block");
+      for (int i = 0; i < featureColumns.size(); i++) recordsCsv.append(",1.0");
+      recordsCsv.append('\n').append("2,same-block");
+      for (int i = 0; i < featureColumns.size(); i++) recordsCsv.append(",0.0");
+      recordsCsv.append('\n');
+      Path records = fixture.resolve("threshold-match-records.csv");
+      Files.writeString(records, recordsCsv);
+      var runtimeConfig = new io.zingg.duckdb.api.RuntimeConfig(
+          "jdbc:duckdb:" + fixture.resolve("threshold-match.duckdb"), 1, 0, null, 1);
+      try (var runtime = new CompatibilityRuntime(runtimeConfig, null);
+           var workflow = new PersistedMatchWorkflow(runtime)) {
+        workflow.restartFromModel(imported);
+        var input = workflow.read(List.of(records), ZinggJob.Phase.MATCH, null);
+        var matches = workflow.match(input, new Matcher.MatchConfig("id", "block", "TRUE", 2.0d)).collect();
+        assertEquals(List.of("1:2"), matches.stream()
+            .map(row -> row.get("id") + ":" + row.get("z_id")).toList(),
+            "the imported model threshold must override the conflicting MatchConfig threshold");
+        assertEquals(1, ((Number) matches.get(0).get("z_prediction")).intValue());
+        assertEquals(oracleProbability("ones"), ((Number) matches.get(0).get("z_score")).doubleValue(), 1e-12);
+      }
+
+      for (String invalidThreshold : List.of("0.0", "1.0")) {
+        Files.writeString(metadata, original.replace("\"threshold\":0.4",
+            "\"threshold\":" + invalidThreshold));
+        Path destination = fixture.resolve("invalid-threshold-" + invalidThreshold + ".model");
+        Files.writeString(destination, "previous-artifact-must-survive");
+        var failure = assertThrows(io.zingg.duckdb.api.DuckException.class,
+            () -> new SparkMlClassifierImporter().importModel(fixture, "zingg-0.7.0", destination));
+        assertEquals("unsupported Spark classifier threshold: expected a value strictly between 0 and 1",
+            failure.getMessage());
+        assertEquals("previous-artifact-must-survive", Files.readString(destination));
+      }
+    } finally {
+      try (var paths = Files.walk(fixture)) {
+        paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+      }
+    }
+  }
+
+  @Test
+  void importedSparkClassifierScoresPersistedMatchPairsAndFeedsNativeLink(@TempDir Path temp)
+      throws Exception {
+    Path fixture = temp.resolve("fixture");
+    copyFixture(fixture);
+    Path model = temp.resolve("imported-classifier.model");
+    new SparkMlClassifierImporter().importModel(fixture, "zingg-0.7.0", model);
+
+    var featureColumns = java.util.stream.IntStream.range(0, 18)
+        .mapToObj(index -> "z_sim" + index).toList();
+    var csv = new StringBuilder("id,block,").append(String.join(",", featureColumns)).append('\n');
+    for (int row = 0; row < 4; row++) {
+      csv.append(row + 1).append(",same-block");
+      for (int feature = 0; feature < featureColumns.size(); feature++) {
+        double value = switch (row) {
+          case 0 -> 0d;
+          case 1 -> 1d;
+          case 2 -> (feature + 1) / 18d;
+          default -> 0d;
+        };
+        csv.append(',').append(value);
+      }
+      csv.append('\n');
+    }
+    Path records = temp.resolve("match-records.csv");
+    Files.writeString(records, csv);
+
+    Path linkInput = temp.resolve("accepted-pairs.csv");
+    var runtimeConfig = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("imported-match.duckdb"), 2, 0, null, 2);
+    try (var runtime = new CompatibilityRuntime(runtimeConfig, null);
+         var workflow = new PersistedMatchWorkflow(runtime)) {
+      workflow.restartFromModel(model);
+      var input = workflow.read(List.of(records), ZinggJob.Phase.MATCH, null);
+      // A config threshold of 2.0 rejects every probability; the persisted
+      // Spark classifier's threshold 0.4 must remain authoritative.
+      var matches = workflow.match(input, new Matcher.MatchConfig("id", "block", "TRUE", 2.0)).collect();
+      assertEquals(List.of("2:3", "2:4"), matches.stream()
+          .map(row -> row.get("id") + ":" + row.get("z_id")).sorted().toList());
+      assertTrue(matches.stream().allMatch(row -> ((Number) row.get("z_prediction")).intValue() == 1));
+      for (var match : matches)
+        assertEquals(oracleProbability("ones"), ((Number) match.get("z_score")).doubleValue(), 1e-12);
+      var linkCsv = new StringBuilder("z_zid,z_z_zid,z_score\n");
+      for (var match : matches)
+        linkCsv.append(match.get("id")).append(',').append(match.get("z_id")).append(',')
+            .append(match.get("z_score")).append('\n');
+      Files.writeString(linkInput, linkCsv);
+    }
+
+    Path linkedEntities = temp.resolve("linked-entities.csv");
+    try (var runtime = new CompatibilityRuntime(new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("native-link.duckdb"), 2, 0, null, 2), null)) {
+      LocalPhaseExecutors.registerNativeLink(runtime);
+      var result = new ZinggPipeline(runtime).execute(new PipelineConfig(
+          ZinggJob.Phase.LINK, List.of(linkInput), linkedEntities, "TRUE"));
+      assertEquals(2, result.inputRows());
+      assertEquals(3, result.outputRows());
+    }
+    var output = Files.readAllLines(linkedEntities);
+    assertEquals(4, output.size()); // header and the 3 entities in one connected component
+    assertTrue(output.get(0).contains("z_zid") && output.get(0).contains("z_minScore")
+        && output.get(0).contains("z_maxScore") && output.get(0).contains("z_cluster"));
+    assertTrue(output.stream().skip(1).anyMatch(line -> line.startsWith("2,")));
+    assertTrue(output.stream().skip(1).anyMatch(line -> line.startsWith("3,")));
+    assertTrue(output.stream().skip(1).anyMatch(line -> line.startsWith("4,")));
+  }
+
+  @Test
   void sparkClassifierImporterDiscoversStageIdsAndParquetFilename() throws Exception {
     var fixture = Files.createTempDirectory("zingg07-discovery-");
     try {

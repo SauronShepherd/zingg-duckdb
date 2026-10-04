@@ -4,9 +4,11 @@ import io.zingg.duckdb.api.DuckException;
 import io.zingg.duckdb.api.Frame;
 import io.zingg.duckdb.model.ModelReader;
 import io.zingg.duckdb.engine.DuckExpr;
+import io.zingg.duckdb.engine.DuckFrame;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -91,20 +93,24 @@ public final class PersistedMatchWorkflow implements AutoCloseable {
     if (decisions.values().stream().noneMatch(d -> d.decision() == LabelDecisionProvider.Decision.MATCH)
         || decisions.values().stream().noneMatch(d -> d.decision() == LabelDecisionProvider.Decision.NON_MATCH))
       throw new DuckException("classifier training requires positive and negative applied labels");
-    if (!pairFeatures.columns().contains(leftIdColumn) || !pairFeatures.columns().contains(rightIdColumn))
+    String leftPhysical = resolveColumn(pairFeatures.columns(), leftIdColumn);
+    String rightPhysical = resolveColumn(pairFeatures.columns(), rightIdColumn);
+    if (leftPhysical == null || rightPhysical == null)
       throw new DuckException("classifier pair ID columns are missing");
-    if (pairFeatures.columns().contains(config.labelColumn()))
+    if (resolveColumn(pairFeatures.columns(), config.labelColumn()) != null)
       throw new DuckException("classifier label column must come from applied decisions");
-    String left = "CAST(" + quote(leftIdColumn) + " AS VARCHAR)";
-    String right = "CAST(" + quote(rightIdColumn) + " AS VARCHAR)";
-    StringBuilder expression = new StringBuilder("CASE");
-    for (var decision : decisions.values()) expression.append(" WHEN ").append(left).append(" = ")
-        .append(literal(decision.leftId())).append(" AND ").append(right).append(" = ")
-        .append(literal(decision.rightId())).append(" THEN ")
-        .append(decision.decision() == LabelDecisionProvider.Decision.MATCH ? "1" : "0");
-    expression.append(" ELSE NULL END");
-    Frame labeled = pairFeatures.withColumn(config.labelColumn(), new DuckExpr(expression.toString()))
-        .filter(new DuckExpr(quote(config.labelColumn()) + " IS NOT NULL"));
+    var rows = new ArrayList<List<Object>>(decisions.size());
+    for (var decision : decisions.values()) {
+      rows.add(List.of(decision.leftId(), decision.rightId(),
+          decision.decision() == LabelDecisionProvider.Decision.MATCH ? 1L : 0L));
+    }
+    // Keep the label mapping relational.  A generated CASE expression grows
+    // with every decision, defeats the SQL planner, and can exceed parser or
+    // protocol limits.  The job-owned mapping table is bounded by the same
+    // decision count and is dropped with the job.
+    if (!(pairFeatures instanceof DuckFrame source))
+      throw new DuckException("classifier pair features require the DuckDB frame implementation");
+    Frame labeled = source.withDecisionMapping(leftPhysical, rightPhysical, config.labelColumn(), rows);
     long labeledRows = labeled.count();
     if (labeledRows != decisions.size())
       throw new DuckException("classifier labeled pairs do not match applied decisions exactly");
@@ -152,12 +158,17 @@ public final class PersistedMatchWorkflow implements AutoCloseable {
     catch (IOException e) { throw new DuckException("persisted classifier cannot be reloaded", e); }
   }
   private static String quote(String identifier) { return "\"" + identifier.replace("\"", "\"\"") + "\""; }
-  private static String literal(String value) {
-    String[] segments = value.split("\u0000", -1);
-    String expression = java.util.Arrays.stream(segments)
-        .map(segment -> "'" + segment.replace("'", "''") + "'")
-        .collect(java.util.stream.Collectors.joining(" || chr(0) || "));
-    return segments.length == 1 ? expression : "(" + expression + ")";
+  private static String resolveColumn(List<String> columns, String requested) {
+    if (requested == null || requested.isBlank()) return null;
+    String match = null;
+    for (String column : columns) {
+      if (column.equalsIgnoreCase(requested)) {
+        if (match != null && !match.equals(column))
+          throw new DuckException("ambiguous classifier column: " + requested);
+        match = column;
+      }
+    }
+    return match;
   }
 
   public State state() { return state; }

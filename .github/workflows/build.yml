@@ -382,6 +382,9 @@ jobs:
               if any(not isinstance(value, int) or value < 2 for value in sample_counts):
                   raise SystemExit(f'insufficient {prefix} resource observations: {sample_counts}')
           print('BENCHMARK_RESULT_VALID')
+          PY
+          python3 packaging/verify-benchmark-report.py benchmark-arrow-linux.json --timing-only
+          python3 packaging/verify-benchmark-report.py benchmark-arrow-resources-linux.json --resource-sampling
       - name: Build and verify release package
         shell: bash
         run: CREATE_JRE=true ./packaging/package-native.sh dist

@@ -22,6 +22,7 @@ import org.apache.arrow.vector.ipc.ArrowReader;
 import org.apache.arrow.vector.ipc.ArrowFileReader;
 import org.apache.arrow.vector.ipc.ArrowStreamReader;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.dictionary.Dictionary;
 
 /** Arrow IPC file ingress converted into a worker-shared, job-private table. */
 final class ArrowFileSupport {
@@ -31,6 +32,8 @@ final class ArrowFileSupport {
   }
 
   private ArrowFileSupport() {}
+
+  private record ArrowColumn(Field field, FieldVector dictionaryValues) {}
 
   static DuckFrame read(DuckJob job, Path path) {
     return read(job, path, false);
@@ -53,9 +56,26 @@ final class ArrowFileSupport {
          var reader = openReader(path, allocator)) {
       if (reader instanceof ArrowFileReader fileReader) fileReader.initialize();
       VectorSchemaRoot root = reader.getVectorSchemaRoot();
-      List<Field> fields = root.getSchema().getFields();
+      List<ArrowColumn> fields = root.getSchema().getFields().stream().map(field -> {
+        var encoding = field.getDictionary();
+        if (encoding == null) return new ArrowColumn(field, null);
+        Dictionary dictionary = reader.lookup(encoding.getId());
+        if (dictionary == null) throw new DuckException("Arrow dictionary is missing: " + encoding.getId());
+        Field valuesField = dictionary.getVector().getField();
+        var valuesType = valuesField.getFieldType();
+        var logicalType = new org.apache.arrow.vector.types.pojo.FieldType(
+            field.isNullable() || valuesType.isNullable(), valuesField.getType(), null, valuesType.getMetadata());
+        return new ArrowColumn(new Field(field.getName(), logicalType, valuesField.getChildren()), dictionary.getVector());
+      }).toList();
       if (fields.isEmpty()) throw new DuckException("Arrow file has no columns: " + path);
-      String columns = fields.stream().map(f -> DuckExpr.quote(f.getName()) + " " + sqlType(f)).collect(java.util.stream.Collectors.joining(", "));
+      var names = new java.util.HashSet<String>();
+      for (ArrowColumn column : fields) {
+        String normalizedName = column.field().getName().toLowerCase(Locale.ROOT);
+        if (!names.add(normalizedName))
+          throw new DuckException("duplicate Arrow field name (case-insensitive): " + column.field().getName());
+      }
+      String columns = fields.stream().map(c -> DuckExpr.quote(c.field().getName()) + " " + sqlType(c.field())
+          + (c.field().isNullable() ? "" : " NOT NULL")).collect(java.util.stream.Collectors.joining(", "));
       try (var statement = job.createStatement()) {
         statement.execute("CREATE TABLE " + DuckExpr.quote(job.schemaName()) + "." + DuckExpr.quote(table) + " (" + columns + ")");
       }
@@ -74,7 +94,7 @@ final class ArrowFileSupport {
               appender.beginRow();
               for (int col = 0; col < fields.size(); col++) {
                 FieldVector vector = root.getVector(col);
-                Object value = vector.isNull(row) ? null : jdbcValue(vector.getObject(row), fields.get(col));
+                Object value = columnValue(fields.get(col), vector, row);
                 appendValue(appender, value);
               }
               appender.endRow();
@@ -96,7 +116,7 @@ final class ArrowFileSupport {
               if ((row & 1023) == 0) job.checkCancelled();
               for (int col = 0; col < fields.size(); col++) {
                 FieldVector vector = root.getVector(col);
-                Object value = vector.isNull(row) ? null : jdbcValue(vector.getObject(row), fields.get(col));
+                Object value = columnValue(fields.get(col), vector, row);
                 insert.setObject(col + 1, value);
               }
               insert.addBatch();
@@ -109,7 +129,7 @@ final class ArrowFileSupport {
           }
         }
       }
-      return new DuckFrame(job, "SELECT * FROM " + DuckExpr.quote(job.schemaName()) + "." + DuckExpr.quote(table), fields.stream().map(Field::getName).toList());
+      return new DuckFrame(job, "SELECT * FROM " + DuckExpr.quote(job.schemaName()) + "." + DuckExpr.quote(table), fields.stream().map(c -> c.field().getName()).toList());
     } catch (Exception e) {
       if (e instanceof InterruptedException) Thread.currentThread().interrupt();
       if (tableCreated) {
@@ -122,6 +142,24 @@ final class ArrowFileSupport {
       if (e instanceof DuckException de) throw de;
       throw new DuckException("Arrow IPC ingestion failed: " + path, e);
     }
+  }
+
+  private static Object columnValue(ArrowColumn column, FieldVector vector, int row) {
+    if (vector.isNull(row)) return nullValue(column);
+    if (column.dictionaryValues() == null) return jdbcValue(vector.getObject(row), column.field());
+    Object rawIndex = vector.getObject(row);
+    if (!(rawIndex instanceof Number indexValue)) throw new DuckException("Arrow dictionary index is not numeric");
+    long index = indexValue.longValue();
+    FieldVector dictionary = column.dictionaryValues();
+    if (index < 0 || index >= dictionary.getValueCount()) throw new DuckException("Arrow dictionary index is out of range: " + index);
+    Object decoded = dictionary.isNull((int) index) ? null : dictionary.getObject((int) index);
+    return decoded == null ? nullValue(column) : jdbcValue(decoded, column.field());
+  }
+
+  private static Object nullValue(ArrowColumn column) {
+    if (!column.field().isNullable())
+      throw new DuckException("null value in non-nullable Arrow field: " + column.field().getName());
+    return null;
   }
 
   private static void appendValue(org.duckdb.DuckDBAppender appender, Object value) throws java.sql.SQLException {
@@ -205,8 +243,8 @@ final class ArrowFileSupport {
       case "DATE" -> "DATE";
       case "TIMESTAMP" -> ((org.apache.arrow.vector.types.pojo.ArrowType.Timestamp) field.getType()).getTimezone() == null
           ? "TIMESTAMP" : "TIMESTAMPTZ";
-      case "BINARY" -> "BLOB";
-      case "UTF8", "STRING", "LARGE_STRING" -> "VARCHAR";
+      case "BINARY", "LARGEBINARY" -> "BLOB";
+      case "UTF8", "STRING", "LARGE_STRING", "LARGEUTF8" -> "VARCHAR";
       default -> throw new DuckException("unsupported Arrow field type: " + field.getType());
     };
   }
@@ -239,8 +277,20 @@ final class ArrowFileSupport {
         }
       }
     }
+    if ("DATE".equals(type) && value instanceof java.time.LocalDate date)
+      return java.sql.Date.valueOf(date);
+    if ("DATE".equals(type) && value instanceof LocalDateTime dateTime)
+      return java.sql.Date.valueOf(dateTime.toLocalDate());
     if ("DATE".equals(type) && value instanceof Number n)
       return java.sql.Date.valueOf(java.time.LocalDate.ofEpochDay(n.longValue()));
+    if ("DATE".equals(type)) {
+      String text = value.toString();
+      try {
+        return java.sql.Date.valueOf(java.time.LocalDate.parse(text));
+      } catch (java.time.format.DateTimeParseException dateOnlyParseFailure) {
+        return java.sql.Date.valueOf(LocalDateTime.parse(text).toLocalDate());
+      }
+    }
     if ("TIMESTAMP".equals(type)) {
       var timestamp = (org.apache.arrow.vector.types.pojo.ArrowType.Timestamp) field.getType();
       if (value instanceof Number n) {

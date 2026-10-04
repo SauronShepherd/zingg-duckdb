@@ -20,6 +20,28 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ZinggPipelineTest {
   @Test
+  void pipelineOutputLimitCancelsStagingWriteAndPreservesDestination(@TempDir Path temp)
+      throws Exception {
+    Path input=temp.resolve("large-records.csv");
+    Path output=temp.resolve("limited-matches.csv");
+    StringBuilder csv=new StringBuilder("id,block\n");
+    for(int i=0;i<100;i++)csv.append(i).append(",same\n");
+    Files.writeString(input,csv);
+    Files.writeString(output,"previous complete result\n");
+    try(var runtime=runtime(temp)){
+      var config=new PipelineConfig(ZinggJob.Phase.MATCH,java.util.List.of(input),output,"TRUE",null,
+          new Matcher.MatchConfig("id","block","1.0",0.5),null,1024*1024,128);
+      DuckException failure=assertThrows(DuckException.class,()->new ZinggPipeline(runtime).execute(config));
+      assertTrue(failure.getMessage().contains("output byte budget exceeded"),failure.toString());
+    }
+    assertEquals("previous complete result\n",Files.readString(output));
+    try(var files=Files.list(temp)){
+      assertTrue(files.noneMatch(path->path.getFileName().toString().startsWith(".limited-matches.csv.partial-")),
+          "quota rejection must remove pipeline staging output");
+    }
+  }
+
+  @Test
   void cancellationBeforeOutputPipelineLeavesExistingDestinationUntouched(@TempDir Path temp)
       throws Exception {
     Path input = temp.resolve("records.csv");

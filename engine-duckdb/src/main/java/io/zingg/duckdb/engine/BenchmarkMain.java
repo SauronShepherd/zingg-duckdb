@@ -16,6 +16,10 @@ public final class BenchmarkMain {
     int repetitions = integerArg(args, "--repetitions", 5);
     if (size < 2 || repetitions < 1) throw new IllegalArgumentException("size >= 2 and repetitions >= 1 are required");
     boolean sampleResources = java.util.Arrays.asList(args).contains("--resource-sampling");
+    if (java.util.Arrays.asList(args).contains("--graph-compare")) {
+      graphCompare(size, repetitions, sampleResources, stringArg(args, "--shape", "path"));
+      return;
+    }
     if (java.util.Arrays.asList(args).contains("--arrow-only")) {
       arrowOnly(size, repetitions, sampleResources);
       return;
@@ -71,6 +75,159 @@ public final class BenchmarkMain {
         + ",\"graphStats\":" + stats(graph) + ",\"arrowWriteStats\":" + stats(arrowWrite)
         + ",\"arrowReadStats\":" + stats(arrowRead) + "}");
   }
+
+  /** Compares sparse entity aggregation with explicitly materialized component-pair closure. */
+  private static void graphCompare(int size, int repetitions, boolean sampleResources, String shape) throws Exception {
+    long pairCount = expectedClosurePairs(size, shape);
+    if (pairCount > GraphOutput.DEFAULT_MAX_TRANSITIVE_PAIRS)
+      throw new IllegalArgumentException("graph comparison size exceeds the default transitive pair budget: " + pairCount);
+    List<GraphOutput.Edge> edges = graphEdges(size, shape);
+    long[] entityNanos = new long[repetitions], closureNanos = new long[repetitions];
+    long[] entityRows = new long[repetitions], closureRows = new long[repetitions];
+    long[] entityOutputBytes = new long[repetitions], closureOutputBytes = new long[repetitions];
+    long[] entitySerializationNanos = new long[repetitions], closureSerializationNanos = new long[repetitions];
+    long[] entityPeakRss = new long[repetitions], closurePeakRss = new long[repetitions];
+    long[] entityRssSamples = new long[repetitions], closureRssSamples = new long[repetitions];
+    var scratch = java.nio.file.Files.createTempDirectory("zingg-duckdb-graph-benchmark-");
+    try {
+      for (int run = -1; run < repetitions; run++) {
+        boolean entityFirst = (run & 1) == 0;
+        GraphMeasurement entity;
+        GraphMeasurement closure;
+        if (entityFirst) {
+          entity = measureEntities(edges, size, scratch, sampleResources);
+          closure = measureClosure(edges, pairCount, scratch, sampleResources);
+        } else {
+          closure = measureClosure(edges, pairCount, scratch, sampleResources);
+          entity = measureEntities(edges, size, scratch, sampleResources);
+        }
+        if (entity.rows() != size || closure.rows() != pairCount)
+          throw new IllegalStateException("graph benchmark output cardinality mismatch");
+        if (run >= 0) {
+          entityNanos[run] = entity.elapsedNanos(); closureNanos[run] = closure.elapsedNanos();
+          entityRows[run] = entity.rows(); closureRows[run] = closure.rows();
+          entityOutputBytes[run] = entity.outputBytes(); closureOutputBytes[run] = closure.outputBytes();
+          entitySerializationNanos[run] = entity.serializationNanos();
+          closureSerializationNanos[run] = closure.serializationNanos();
+          entityPeakRss[run] = entity.maxObservedRssBytes(); closurePeakRss[run] = closure.maxObservedRssBytes();
+          entityRssSamples[run] = entity.resourceSamples(); closureRssSamples[run] = closure.resourceSamples();
+        }
+      }
+    } finally {
+      try (var paths = java.nio.file.Files.walk(scratch)) {
+        for (var path : paths.sorted(java.util.Comparator.reverseOrder()).toList())
+          java.nio.file.Files.deleteIfExists(path);
+      }
+    }
+    System.out.println("{\"benchmark\":\"zingg-duckdb-graph-compare\",\"shape\":\"" + shape + "\",\"vertices\":"
+        + size + ",\"inputEdges\":" + edges.size() + ",\"closurePairs\":" + pairCount
+        + ",\"repetitions\":" + repetitions + ",\"warmupRuns\":1,\"resourceSamplingEnabled\":"
+        + sampleResources + ",\"resourceSamplingIntervalMs\":" + (sampleResources ? 50 : 0)
+        + ",\"entityScoresMedianNs\":" + median(entityNanos) + ",\"entityScoresSamplesNs\":" + samples(entityNanos)
+        + ",\"entityScoresStats\":" + stats(entityNanos)
+        + ",\"entityScoresRows\":" + samples(entityRows) + ",\"entityScoresOutputBytes\":" + samples(entityOutputBytes)
+        + ",\"entityScoresSerializationSamplesNs\":" + samples(entitySerializationNanos)
+        + ",\"entityScoresMaxObservedRssBytes\":" + samples(entityPeakRss)
+        + ",\"entityScoresResourceSampleCounts\":" + samples(entityRssSamples)
+        + ",\"transitiveEdgesMedianNs\":" + median(closureNanos)
+        + ",\"transitiveEdgesSamplesNs\":" + samples(closureNanos)
+        + ",\"transitiveEdgesStats\":" + stats(closureNanos)
+        + ",\"transitiveEdgesRows\":" + samples(closureRows)
+        + ",\"transitiveEdgesOutputBytes\":" + samples(closureOutputBytes)
+        + ",\"transitiveEdgesSerializationSamplesNs\":" + samples(closureSerializationNanos)
+        + ",\"transitiveEdgesMaxObservedRssBytes\":" + samples(closurePeakRss)
+        + ",\"transitiveEdgesResourceSampleCounts\":" + samples(closureRssSamples) + "}");
+  }
+
+  private static List<GraphOutput.Edge> graphEdges(int size, String shape) {
+    var edges = new ArrayList<GraphOutput.Edge>();
+    switch (shape) {
+      case "path" -> {
+        for (int node = 0; node < size - 1; node++) edges.add(new GraphOutput.Edge(node, node + 1, 1d));
+      }
+      case "star" -> {
+        for (int node = 1; node < size; node++) edges.add(new GraphOutput.Edge(0, node, 1d));
+      }
+      case "dense" -> {
+        for (int left = 0; left < size; left++)
+          for (int right = left + 1; right < size; right++)
+            edges.add(new GraphOutput.Edge(left, right, 1d));
+      }
+      case "disconnected" -> {
+        for (int node = 0; node + 1 < size; node += 2)
+          edges.add(new GraphOutput.Edge(node, node + 1, 1d));
+        if ((size & 1) != 0) edges.add(new GraphOutput.Edge(size - 1, 0, 1d));
+      }
+      default -> throw new IllegalArgumentException("unsupported graph shape: " + shape
+          + " (expected path, star, dense, or disconnected)");
+    }
+    return List.copyOf(edges);
+  }
+
+  private static long expectedClosurePairs(int size, String shape) {
+    return switch (shape) {
+      case "path", "star", "dense" -> Math.multiplyExact((long) size, size - 1L) / 2L;
+      case "disconnected" -> size % 2 == 0 ? size / 2L : 3L + (size - 3L) / 2L;
+      default -> throw new IllegalArgumentException("unsupported graph shape: " + shape);
+    };
+  }
+
+  private static GraphMeasurement measureEntities(List<GraphOutput.Edge> edges, int expectedRows,
+      java.nio.file.Path scratch, boolean sampleResources) throws Exception {
+    var output = scratch.resolve("entity-scores.csv");
+    long baselineRss = ProcessResourceSnapshot.residentBytes();
+    BenchmarkResourceMonitor monitor = sampleResources ? new BenchmarkResourceMonitor(scratch, 50) : null;
+    List<GraphOutput.EntityScore> result;
+    long begin = System.nanoTime();
+    long elapsed;
+    try {
+      result = GraphOutput.entityScores(edges, () -> 1_700_000_000_000L);
+      elapsed = System.nanoTime() - begin;
+    }
+    finally { if (monitor != null) monitor.close(); }
+    if (result.size() != expectedRows) throw new IllegalStateException("entityScores cardinality mismatch");
+    long serializationBegin = System.nanoTime();
+    try (var writer = java.nio.file.Files.newBufferedWriter(output, java.nio.charset.StandardCharsets.UTF_8)) {
+      writer.write("id,min,max,cluster\n");
+      for (var row : result) writer.write(row.id() + "," + row.min() + "," + row.max() + "," + row.cluster() + "\n");
+    }
+    long serializationNanos = System.nanoTime() - serializationBegin;
+    long peakRss = monitor == null ? -1 : Math.max(monitor.maxRssBytes(), baselineRss);
+    int samples = monitor == null ? 0 : monitor.samples();
+    long bytes = java.nio.file.Files.size(output);
+    java.nio.file.Files.delete(output);
+    return new GraphMeasurement(elapsed, result.size(), bytes, serializationNanos, peakRss, samples);
+  }
+
+  private static GraphMeasurement measureClosure(List<GraphOutput.Edge> edges, long expectedRows,
+      java.nio.file.Path scratch, boolean sampleResources) throws Exception {
+    var output = scratch.resolve("transitive-edges.csv");
+    long baselineRss = ProcessResourceSnapshot.residentBytes();
+    BenchmarkResourceMonitor monitor = sampleResources ? new BenchmarkResourceMonitor(scratch, 50) : null;
+    List<GraphOutput.Edge> result;
+    long begin = System.nanoTime();
+    long elapsed;
+    try {
+      result = GraphOutput.transitiveEdges(edges);
+      elapsed = System.nanoTime() - begin;
+    }
+    finally { if (monitor != null) monitor.close(); }
+    if (result.size() != expectedRows) throw new IllegalStateException("transitiveEdges cardinality mismatch");
+    long serializationBegin = System.nanoTime();
+    try (var writer = java.nio.file.Files.newBufferedWriter(output, java.nio.charset.StandardCharsets.UTF_8)) {
+      writer.write("left,right,score\n");
+      for (var row : result) writer.write(row.left() + "," + row.right() + "," + row.score() + "\n");
+    }
+    long serializationNanos = System.nanoTime() - serializationBegin;
+    long peakRss = monitor == null ? -1 : Math.max(monitor.maxRssBytes(), baselineRss);
+    int samples = monitor == null ? 0 : monitor.samples();
+    long bytes = java.nio.file.Files.size(output);
+    java.nio.file.Files.delete(output);
+    return new GraphMeasurement(elapsed, result.size(), bytes, serializationNanos, peakRss, samples);
+  }
+
+  private record GraphMeasurement(long elapsedNanos, long rows, long outputBytes, long serializationNanos,
+                                  long maxObservedRssBytes, long resourceSamples) {}
 
   private static void arrowOnly(int size, int repetitions, boolean sampleResources) throws Exception {
     long[] write = new long[repetitions], ingest = new long[repetitions], appenderIngest = new long[repetitions];
@@ -195,6 +352,11 @@ public final class BenchmarkMain {
 
   private static int integerArg(String[] args, String name, int fallback) {
     for (int i = 0; i + 1 < args.length; i++) if (name.equals(args[i])) return Integer.parseInt(args[i + 1]);
+    return fallback;
+  }
+
+  private static String stringArg(String[] args, String name, String fallback) {
+    for (int i = 0; i + 1 < args.length; i++) if (name.equals(args[i])) return args[i + 1];
     return fallback;
   }
 

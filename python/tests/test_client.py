@@ -2,6 +2,9 @@ import unittest
 import sys
 import io
 import threading
+import tempfile
+import time
+from pathlib import Path
 from unittest.mock import patch
 
 from zingg_duckdb.client import WorkerClient
@@ -111,24 +114,54 @@ class WorkerClientHelpersTest(unittest.TestCase):
             client.close()
 
     def test_cancel_terminates_worker_and_unblocks_an_inflight_request(self):
-        script = "import sys,time; sys.stdin.readline(); print('ready', file=sys.stderr, flush=True); time.sleep(60)"
-        client = WorkerClient(command=[sys.executable, "-c", script])
-        failures = []
-        request = threading.Thread(
-            target=lambda: self._capture_request_failure(client, failures), daemon=True)
-        request.start()
-        self.assertEqual("ready\n", client._process.stderr.readline(),
-                         "child must consume the request before cancellation")
-        client.cancel()
-        request.join(timeout=2)
+        with tempfile.TemporaryDirectory() as directory:
+            ready = Path(directory) / "ready"
+            script = "import pathlib,sys,time; sys.stdin.readline(); pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(60)"
+            client = WorkerClient(command=[sys.executable, "-c", script, str(ready)])
+            failures = []
+            request = threading.Thread(
+                target=lambda: self._capture_request_failure(client, failures), daemon=True)
+            request.start()
+            self._wait_for_file(ready)
+            client.cancel()
+            request.join(timeout=2)
+            try:
+                self.assertFalse(request.is_alive(), "terminating the worker must unblock stdout.readline")
+                self.assertIsNotNone(client._process.poll())
+                self.assertEqual(1, len(failures))
+                self.assertIsInstance(failures[0], RuntimeError)
+                self.assertIn("exited unexpectedly", str(failures[0]))
+            finally:
+                client.close()
+
+    def test_request_timeout_terminates_silent_worker(self):
+        script = "import sys,time; sys.stdin.readline(); time.sleep(60)"
+        client = WorkerClient(command=[sys.executable, "-c", script], request_timeout=0.1)
         try:
-            self.assertFalse(request.is_alive(), "terminating the worker must unblock stdout.readline")
+            with self.assertRaisesRegex(TimeoutError, "worker terminated"):
+                client.request("ping")
             self.assertIsNotNone(client._process.poll())
-            self.assertEqual(1, len(failures))
-            self.assertIsInstance(failures[0], RuntimeError)
-            self.assertIn("exited unexpectedly", str(failures[0]))
         finally:
             client.close()
+
+    def test_stderr_is_inherited_to_avoid_an_undrained_child_pipe(self):
+        with patch("zingg_duckdb.client.subprocess.Popen") as popen:
+            class FakeProcess:
+                stdin = io.StringIO()
+                stdout = io.StringIO()
+                def poll(self): return 0
+            popen.return_value = FakeProcess()
+            WorkerClient(command=["worker"])
+            self.assertIsNone(popen.call_args.kwargs["stderr"])
+
+    @staticmethod
+    def _wait_for_file(path):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if path.exists():
+                return
+            time.sleep(0.01)
+        raise AssertionError(f"worker did not create readiness marker: {path}")
 
     @staticmethod
     def _capture_request_failure(client, failures):
@@ -162,15 +195,22 @@ class WorkerClientHelpersTest(unittest.TestCase):
         self.assertEqual([5, 5], client._process.wait_timeouts)
 
     def test_request_handle_cancels_only_its_correlated_operation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready = Path(directory) / "ready"
+            self._test_request_handle_cancels_only_its_correlated_operation_with_marker(ready)
+
+    def _test_request_handle_cancels_only_its_correlated_operation_with_marker(self, ready):
         script = r'''
 import sys, threading
+from pathlib import Path
 cancelled = threading.Event()
 write_lock = threading.Lock()
+ready = Path(sys.argv[1])
 def respond(request_id, status, payload):
     with write_lock:
         print(request_id + "\t" + status + "\t" + payload, flush=True)
 def long_request(request_id):
-    print("long-request-started", file=sys.stderr, flush=True)
+    ready.write_text("started")
     cancelled.wait(10)
     respond(request_id, "error", "operation cancelled")
 for line in sys.stdin:
@@ -183,10 +223,10 @@ for line in sys.stdin:
     elif operation == "ping":
         respond(request_id, "ok", "pong")
 '''
-        client = WorkerClient(command=[sys.executable, "-c", script])
+        client = WorkerClient(command=[sys.executable, "-c", script, str(ready)])
         try:
             active = client.submit("long")
-            self.assertEqual("long-request-started\n", client._process.stderr.readline())
+            self._wait_for_file(ready)
             self.assertEqual("cancel_requested", active.cancel())
             with self.assertRaisesRegex(RuntimeError, "operation cancelled"):
                 active.result(timeout=5)
@@ -218,9 +258,41 @@ for line in sys.stdin:
 
         # The option is part of the default-launch path; verify it without starting a process.
         with patch("zingg_duckdb.client.subprocess.Popen", return_value=FakeProcess()) as popen:
-            WorkerClient(max_collect_bytes=123)
+            with patch("zingg_duckdb.client.Path.exists", return_value=True):
+                WorkerClient(max_collect_bytes=123)
             self.assertIn("--max-collect-bytes", popen.call_args.args[0])
             self.assertIn("123", popen.call_args.args[0])
+
+    def test_input_byte_budget_is_forwarded_to_worker(self):
+        class FakePipe:
+            def close(self): pass
+        class FakeProcess:
+            stdin = FakePipe()
+            stdout = FakePipe()
+            stderr = FakePipe()
+            def poll(self): return 0
+        with patch("zingg_duckdb.client.subprocess.Popen", return_value=FakeProcess()) as popen:
+            with patch("zingg_duckdb.client.Path.exists", return_value=True):
+                WorkerClient(max_input_bytes=456)
+        command = popen.call_args.args[0]
+        index = command.index("--max-input-bytes")
+        self.assertEqual("456", command[index + 1])
+
+    def test_temp_directory_is_forwarded_to_worker(self):
+        class FakePipe:
+            def close(self): pass
+        class FakeProcess:
+            stdin = FakePipe()
+            stdout = FakePipe()
+            stderr = FakePipe()
+            def poll(self): return 0
+
+        with patch("zingg_duckdb.client.subprocess.Popen", return_value=FakeProcess()) as popen:
+            with patch("zingg_duckdb.client.Path.exists", return_value=True):
+                WorkerClient(temp_directory="/mnt/zingg-spill")
+        command = popen.call_args.args[0]
+        index = command.index("--temp-directory")
+        self.assertEqual("/mnt/zingg-spill", command[index + 1])
 
     def test_labels_root_and_apply_labels_payload(self):
         from zingg_duckdb.worker import DuckWorker, _decode_payload, _payload
@@ -234,7 +306,8 @@ for line in sys.stdin:
             def poll(self): return 0
 
         with patch("zingg_duckdb.client.subprocess.Popen", return_value=FakeProcess()) as popen:
-            WorkerClient(labels_root="labels")
+            with patch("zingg_duckdb.client.Path.exists", return_value=True):
+                WorkerClient(labels_root="labels")
             self.assertIn("--labels-root", popen.call_args.args[0])
             self.assertIn("labels", popen.call_args.args[0])
 

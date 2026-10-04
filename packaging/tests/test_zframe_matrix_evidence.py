@@ -75,8 +75,9 @@ class ZFrameMatrixEvidenceTest(unittest.TestCase):
         self.assertGreater(len(linked), 0)
         isolated = [row for row in linked
                     if row["adapterDisposition"] == "PER_OVERLOAD_SPARK_DIFFERENTIAL"]
-        self.assertEqual(62, len(isolated))
-        self.assertEqual({"aggSumMatchesSpark", "getMaxValMatchesSpark", "countMatchesSpark",
+        self.assertEqual(64, len(isolated))
+        self.assertEqual({"asStringMatchesSparkForQualifiedSelfJoin",
+                          "aggSumMatchesSpark", "getMaxValMatchesSpark", "countMatchesSpark",
                           "showSchemaMatchesSpark", "columnsMatchesSpark",
                           "fieldNamesMatchesSpark", "collectFirstColumnMatchesSpark", "isEmptyMatchesSpark",
                           "getMatchesSpark", "getAsIntMatchesSpark", "getAsLongMatchesSpark",
@@ -114,6 +115,7 @@ class ZFrameMatrixEvidenceTest(unittest.TestCase):
                           "prefixedJoinMatchesSparkForDuplicatesAndNulls",
                           "rightJoinMatchesSparkForDuplicateNullAndUnmatchedKeys",
                           "joinOnColumnUsingMatchesSparkForDuplicatesAndNulls",
+                          "joinOnColumnExpressionPreservesSparkDuplicateNames",
                           "distinctMatchesSparkForDuplicateAndNullRows",
                           "exceptAndIntersectMatchSparkSetSemanticsForDuplicatesAndNulls",
                           "groupByCountOverloadsMatchSparkForDuplicatesAndNullKeys",

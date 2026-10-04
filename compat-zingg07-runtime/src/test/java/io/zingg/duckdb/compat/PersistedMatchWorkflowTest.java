@@ -14,6 +14,36 @@ import org.junit.jupiter.api.io.TempDir;
 
 class PersistedMatchWorkflowTest {
   @Test
+  void persistedClassifierThresholdOverridesConflictingMatchConfig(@TempDir Path temp) throws Exception {
+    Path records = temp.resolve("threshold-records.csv");
+    Files.writeString(records, "id,block,feature\n1,same,0.2\n2,same,0.8\n");
+    Path artifact = temp.resolve("classifier-threshold-073");
+    double probability = 0.60d;
+    double intercept = Math.log(probability / (1.0d - probability));
+    new NativeClassifierArtifact().write(new NativeClassifierArtifact.Config(
+        "zingg-0.7.0", List.of("feature"), new double[] {0d}, intercept, true,
+        artifact, 0.73d, List.of(), 0));
+
+    var config = new RuntimeConfig("jdbc:duckdb:" + temp.resolve("threshold-precedence.duckdb"),
+        1, 0, null, 1);
+    try (var runtime = new CompatibilityRuntime(config, null);
+         var workflow = new PersistedMatchWorkflow(runtime)) {
+      workflow.restartFromModel(artifact);
+      var input = workflow.read(List.of(records), ZinggJob.Phase.MATCH, null);
+      var result = workflow.match(input, new Matcher.MatchConfig("id", "block", "TRUE", 0.10d));
+
+      assertEquals(0, result.count(),
+          "the persisted 0.73 threshold must reject probability 0.60 despite MatchConfig threshold 0.10");
+      assertEquals(PersistedMatchWorkflow.State.MATCHED, workflow.state());
+    }
+
+    var persisted = (LinearClassifier) new ModelScorerRegistry().create(
+        io.zingg.duckdb.model.ModelReader.load(artifact, 64L * 1024 * 1024));
+    assertEquals(0.73d, persisted.threshold());
+    assertEquals(probability, persisted.score(java.util.Map.of("feature", 0.2d)), 1e-12);
+  }
+
+  @Test
   void backendHistogramCannotMasqueradeAsPersistedClassifier(@TempDir Path temp) throws Exception {
     Path input = temp.resolve("records.csv");
     Files.writeString(input, "name,city\nAlice,London\nAlicia,London\nBob,Paris\n");

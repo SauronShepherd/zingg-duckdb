@@ -61,7 +61,9 @@ public final class SparkMlClassifierImporter {
           || !SPARK_VERSION.equals(stringField(polynomial, "sparkVersion"))
           || !SPARK_VERSION.equals(stringField(logistic, "sparkVersion")))
         throw new DuckException("unsupported Spark classifier version");
-      if (inputCols.size() != 18 || degree != 3 || threshold != 0.4d) throw new DuckException("unsupported Spark classifier metadata");
+      if (inputCols.size() != 18 || degree != 3) throw new DuckException("unsupported Spark classifier metadata");
+      if (threshold <= 0d || threshold >= 1d)
+        throw new DuckException("unsupported Spark classifier threshold: expected a value strictly between 0 and 1");
       if (inputCols.stream().anyMatch(String::isBlank) || inputCols.stream().distinct().count() != inputCols.size())
         throw new DuckException("invalid Spark classifier inputCols");
       if (!stringParamField(assembler, "outputCol").equals(stringParamField(polynomial, "inputCol"))

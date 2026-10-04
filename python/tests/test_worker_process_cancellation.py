@@ -20,6 +20,31 @@ FIXTURE_CLASSES = Path(os.environ.get(
 @unittest.skipUnless(JAVA and WORKER_JAR.is_file(),
                      "requires Java and the packaged runtime-worker JAR")
 class PackagedWorkerCancellationTest(unittest.TestCase):
+    def test_request_timeout_reaps_packaged_worker_and_fresh_worker_recovers(self):
+        command = [JAVA, "-jar", str(WORKER_JAR), "--unsafe-debug-sql"]
+        worker = DuckWorker(command=command, request_timeout=30)
+        process = worker.client._process
+        try:
+            self.assertEqual("pong", worker.ping(), "warm the packaged worker before applying timeout")
+            worker.client.request_timeout = 0.05
+            started = time.monotonic()
+            with self.assertRaisesRegex(TimeoutError, "worker terminated"):
+                worker.client.request("count SELECT sum(i) FROM range(1000000000000) t(i)")
+            self.assertLess(time.monotonic() - started, 8,
+                            "request timeout must terminate the active packaged worker promptly")
+            self.assertIsNotNone(process.poll(), "timed-out worker process must have exited")
+            self.assertEqual(process.returncode, process.wait(timeout=0),
+                             "the timed-out child must be reaped, not left as a zombie")
+        finally:
+            worker.client.close()
+
+        restarted = DuckWorker(command=command, request_timeout=10)
+        try:
+            self.assertEqual("pong", restarted.ping(),
+                             "a fresh packaged worker must accept requests after timeout recovery")
+        finally:
+            restarted.client.close()
+
     def test_active_request_is_cancelled_and_worker_accepts_next_request(self):
         worker = DuckWorker(command=[JAVA, "-jar", str(WORKER_JAR), "--unsafe-debug-sql"])
         try:
@@ -49,7 +74,7 @@ class PackagedWorkerCancellationTest(unittest.TestCase):
                 self.assertEqual("pong", worker.ping(), "start the worker before measuring training")
                 fields = ["", str(artifact), "label", "feature", "2000", "1000000",
                           "0.05", "0.0001", "cancel-test", str(source)]
-                active = worker.request_async("train", _payload(*fields))
+                active = worker.request_async("train_classifier", _payload(*fields))
                 # CSV import and initial frame setup should finish well before
                 # the million-iteration fit; keep the request active long
                 # enough to exercise cancellation during the CPU-heavy command.

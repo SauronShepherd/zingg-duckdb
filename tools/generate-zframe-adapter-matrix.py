@@ -105,10 +105,12 @@ SPARK_DIFFERENTIALS = {
 # against Spark. Keep the method name per signature so the matrix cannot accidentally
 # promote unrelated calls merely because they share a large fixture.
 PER_OVERLOAD_SPARK_DIFFERENTIALS = {
+    "public abstract zingg.common.client.ZFrame<D, R, C> as(java.lang.String);": "asStringMatchesSparkForQualifiedSelfJoin",
     "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, C, java.lang.String);": "aliasedSelfJoinPreservesDuplicateNamesAndSqlNullEquality",
     "public abstract zingg.common.client.ZFrame<D, R, C> join(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "prefixedJoinMatchesSparkForDuplicatesAndNulls",
     "public abstract zingg.common.client.ZFrame<D, R, C> joinRight(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "rightJoinMatchesSparkForDuplicateNullAndUnmatchedKeys",
     "public abstract zingg.common.client.ZFrame<D, R, C> joinOnCol(zingg.common.client.ZFrame<D, R, C>, java.lang.String);": "joinOnColumnUsingMatchesSparkForDuplicatesAndNulls",
+    "public abstract zingg.common.client.ZFrame<D, R, C> joinOnCol(zingg.common.client.ZFrame<D, R, C>, C);": "joinOnColumnExpressionPreservesSparkDuplicateNames",
     "public abstract zingg.common.client.ZFrame<D, R, C> distinct();": "distinctMatchesSparkForDuplicateAndNullRows",
     "public abstract zingg.common.client.ZFrame<D, R, C> except(zingg.common.client.ZFrame<D, R, C>);": "exceptAndIntersectMatchSparkSetSemanticsForDuplicatesAndNulls",
     "public abstract zingg.common.client.ZFrame<D, R, C> intersect(zingg.common.client.ZFrame<D, R, C>);": "exceptAndIntersectMatchSparkSetSemanticsForDuplicatesAndNulls",

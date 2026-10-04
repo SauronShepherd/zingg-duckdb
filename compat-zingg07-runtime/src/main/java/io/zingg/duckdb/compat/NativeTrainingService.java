@@ -53,15 +53,18 @@ public final class NativeTrainingService {
     try {
       cancellation.throwIfCancelled();
       Path root = config.artifactDirectory().toAbsolutePath().normalize();
-      Files.createDirectories(root);
       var manifest = new ModelManifest("duckdb-native-0.1", "0.1.0", "zingg-0.1-native", ModelType.BACKEND_BLOCKING_HISTOGRAM.name(), config.features(), "");
       var provenance = new ImportProvenance(root.toString(), "0.7.0", importerVersion, Instant.now(), "");
       var writerCancellation = DuckCancellation.current();
       new ModelArtifactWriter(root, writerCancellation == null ? () -> false : writerCancellation::isCancelled)
-          .write(manifest, payload.getBytes(StandardCharsets.UTF_8), provenance);
+          .write(manifest, payload.getBytes(StandardCharsets.UTF_8), provenance,
+              config.maxArtifactBytes());
       return new Result(root, rows, prepared.columns());
     } catch (Exception e) {
       if (e instanceof DuckException de) throw de;
+      if (e instanceof java.io.IOException io && io.getMessage() != null
+          && io.getMessage().startsWith("model artifact byte budget exceeded:"))
+        throw new DuckException(io.getMessage(), io);
       throw new DuckException("native training artifact write failed", e);
     }
   }

@@ -11,12 +11,13 @@ import org.apache.arrow.vector.ipc.ArrowStreamWriter;
 import org.apache.arrow.vector.types.pojo.*;
 
 /** Lazy relational frame whose execution and temporary state belong to one DuckJob. */
-final class DuckFrame implements Frame {
+public final class DuckFrame implements Frame {
   private final DuckJob job;
   private final String plan;
   private final List<String> columns;
   private final RelationScope scope;
   private final boolean zeroColumns;
+  private final OutputPublisher outputPublisher;
 
   DuckFrame(DuckJob job, String plan, List<String> columns) {
     this(job, plan, columns, RelationScope.QUERY_ONLY, false);
@@ -25,10 +26,15 @@ final class DuckFrame implements Frame {
     this(job, plan, columns, scope, false);
   }
   DuckFrame(DuckJob job, String plan, List<String> columns, RelationScope scope, boolean zeroColumns) {
+    this(job, plan, columns, scope, zeroColumns, OutputPublisher.atomic());
+  }
+  DuckFrame(DuckJob job, String plan, List<String> columns, RelationScope scope,
+      boolean zeroColumns, OutputPublisher outputPublisher) {
     this.job = Objects.requireNonNull(job); this.plan = Objects.requireNonNull(plan);
     this.columns = List.copyOf(columns == null ? List.of() : columns);
     this.scope = Objects.requireNonNull(scope);
     this.zeroColumns = zeroColumns;
+    this.outputPublisher = Objects.requireNonNull(outputPublisher);
   }
   public JobId owner() { return job.id(); }
   RelationScope scope() { return scope; }
@@ -69,7 +75,8 @@ final class DuckFrame implements Frame {
   public String explain() {
     try (var s=job.createStatement(); var r=s.executeQuery("EXPLAIN "+plan)) {
       var out=new StringBuilder();
-      while(r.next()) { if(out.length()>0) out.append(System.lineSeparator()); out.append(r.getString(1)); }
+      int planColumn = r.getMetaData().getColumnCount() >= 2 ? 2 : 1;
+      while(r.next()) { if(out.length()>0) out.append(System.lineSeparator()); out.append(r.getString(planColumn)); }
       return out.toString();
     } catch(SQLException e) { throw new DuckException("explain failed",e); }
   }
@@ -83,20 +90,98 @@ final class DuckFrame implements Frame {
       var declared=availableColumns();
       if (!zeroColumns) for(int i=1;i<=m.getColumnCount();i++) names.add(declared.size()==m.getColumnCount()?declared.get(i-1):m.getColumnName(i));
       var out=new ArrayList<Row>(); long collectedBytes=0;
-      while(r.next()) { cancellation.throwIfCancelled(); var values=new ArrayList<Object>();
-        if (!zeroColumns) for(int i=1;i<=m.getColumnCount();i++) values.add(r.getObject(i));
-        out.add(new Row(names,values)); job.budget().enforceRows(out.size());
-        for(Object value:values) collectedBytes += String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 1L;
-        job.budget().enforceCollectBytes(collectedBytes + (long)out.size() * 8L);
+      long collectByteLimit=job.budget().maxCollectBytes();
+      while(r.next()) {
+        cancellation.throwIfCancelled();
+        int nextRowCount=out.size()+1;
+        try { job.budget().enforceRows(nextRowCount); }
+        catch (DuckException exceeded) {
+          cancelStatement(s,exceeded);
+          throw exceeded;
+        }
+        var values=new ArrayList<Object>();
+        if (!zeroColumns) for(int i=1;i<=m.getColumnCount();i++) {
+          Object value=r.getObject(i);
+          if(collectByteLimit>0) {
+            long valueBytes;
+            try { valueBytes=collectValueBytes(value); }
+            catch(SQLException sizeFailure) {
+              DuckException exceeded=new DuckException("cannot account for collected JDBC value",sizeFailure);
+              cancelStatement(s,exceeded);
+              throw exceeded;
+            }
+            collectedBytes=addCollectBytes(collectedBytes,valueBytes,collectByteLimit);
+            long estimatedTotal=addCollectBytes(collectedBytes,Math.multiplyExact((long)nextRowCount,8L),collectByteLimit);
+            try { job.budget().enforceCollectBytes(estimatedTotal); }
+            catch (DuckException exceeded) {
+              cancelStatement(s,exceeded);
+              throw exceeded;
+            }
+          }
+          values.add(value);
+        }
+        if(collectByteLimit>0) {
+          long estimatedTotal=addCollectBytes(collectedBytes,Math.multiplyExact((long)nextRowCount,8L),collectByteLimit);
+          try { job.budget().enforceCollectBytes(estimatedTotal); }
+          catch (DuckException exceeded) {
+            cancelStatement(s,exceeded);
+            throw exceeded;
+          }
+        }
+        out.add(new Row(names,values));
       }
       return List.copyOf(out); }
-    } catch(SQLException e) { throw new DuckException("collect failed",e); }
+    } catch(SQLException e) { cancellation.throwIfCancelled(); throw new DuckException("collect failed",e); }
   }
-  public Frame split(String column,String pattern,String resultColumn){if(column==null||column.isBlank()||pattern==null||resultColumn==null||resultColumn.isBlank())throw new DuckException("split columns and pattern are required");var available=availableColumns();if(!available.contains(column))throw new DuckException("split column is not present: "+column);var output=new ArrayList<>(available);if(!resultColumn.equals(column)&&output.contains(resultColumn))throw new DuckException("split result column already exists: "+resultColumn);if(!resultColumn.equals(column)){output.remove(column);output.add(resultColumn);}return new DuckFrame(job,"SELECT * EXCLUDE ("+DuckExpr.quote(column)+"), string_split("+DuckExpr.quote(column)+", "+DuckExpr.literal(pattern).sql()+") AS "+DuckExpr.quote(resultColumn)+" FROM ("+plan+") zd",output);}
+  private static void cancelStatement(Statement statement,DuckException failure) {
+    try { statement.cancel(); }
+    catch(SQLException cancelFailure) { failure.addSuppressed(cancelFailure); }
+  }
+  private static long addCollectBytes(long current,long additional,long limit) {
+    long total;
+    try { total=Math.addExact(current,additional); }
+    catch(ArithmeticException overflow) {
+      throw new DuckException("collect byte budget accounting overflow at limit " + limit + " bytes",overflow);
+    }
+    return total;
+  }
+  private static long collectValueBytes(Object value) throws SQLException {
+    if(value==null) return 1L;
+    if(value instanceof byte[] bytes) return Math.addExact((long)bytes.length,1L);
+    if(value instanceof java.sql.Blob blob) {
+      try {
+        return Math.addExact(blob.length(),1L);
+      } finally {
+        blob.free();
+      }
+    }
+    if(value instanceof CharSequence text) {
+      long bytes=0;
+      for(int i=0;i<text.length();i++) {
+        char c=text.charAt(i);
+        if(c<=0x7f) bytes++;
+        else if(c<=0x7ff) bytes+=2;
+        else if(Character.isHighSurrogate(c)&&i+1<text.length()&&Character.isLowSurrogate(text.charAt(i+1))) {
+          bytes+=4; i++;
+        } else if(Character.isSurrogate(c)) bytes++;
+        else bytes+=3;
+      }
+      return bytes+1L;
+    }
+    if(value instanceof Number || value instanceof Boolean || value instanceof java.time.temporal.TemporalAccessor
+        || value instanceof java.sql.Date || value instanceof java.sql.Time || value instanceof java.sql.Timestamp
+        || value instanceof java.util.UUID) {
+      return String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8).length+1L;
+    }
+    throw new SQLException("unsupported JDBC value type for maxCollectBytes accounting: "
+        + value.getClass().getName());
+  }
+  public Frame split(String column,String pattern,String resultColumn){if(column==null||column.isBlank()||pattern==null||resultColumn==null||resultColumn.isBlank())throw new DuckException("split columns and pattern are required");var available=availableColumns();String source=matchingIdentifier(available,column);if(source==null)throw new DuckException("split column is not present: "+column);String existingResult=matchingIdentifier(available,resultColumn);if(existingResult!=null&&!existingResult.equalsIgnoreCase(source))throw new DuckException("split result column already exists: "+resultColumn);return new DuckFrame(job,"SELECT * EXCLUDE ("+DuckExpr.quote(source)+"), string_split("+DuckExpr.quote(source)+", "+DuckExpr.literal(pattern).sql()+") AS "+DuckExpr.quote(resultColumn)+" FROM ("+plan+") zd",List.of());}
   private void same(Frame other){if(other==null||!owner().equals(other.owner()))throw new DuckException("cross-job DuckFrame operation");}
   private static String joinType(String value){if(value==null)throw new DuckException("join type is required");return switch(value.trim().toLowerCase(Locale.ROOT)){case "inner"->"INNER";case "left","left_outer"->"LEFT";case "right","right_outer"->"RIGHT";case "full","outer","full_outer"->"FULL OUTER";case "left_semi"->"SEMI";case "left_anti"->"ANTI";default->throw new DuckException("unsupported join type: "+value);};}
+  private static String matchingIdentifier(List<String> columns,String requested){return io.zingg.duckdb.api.ColumnResolver.resolve(columns,requested);}
   private DuckFrame q(String sql){return new DuckFrame(job,sql,columns,scope,zeroColumns);}
-  public Frame select(String... c){if(c==null||c.length==0)throw new DuckException("select requires columns");var available=availableColumns();var selected=Arrays.stream(c).map(x->{if(x==null||x.isBlank()||!available.contains(x))throw new DuckException("selected column is not present: "+x);return x;}).toList();return new DuckFrame(job,"SELECT "+String.join(",",selected.stream().map(DuckExpr::quote).toList())+" FROM ("+plan+") zd",selected);}
+  public Frame select(String... c){if(c==null||c.length==0)throw new DuckException("select requires columns");var available=availableColumns();var selected=Arrays.stream(c).map(x->{String match=x==null||x.isBlank()?null:matchingIdentifier(available,x);if(match==null)throw new DuckException("selected column is not present: "+x);return match;}).toList();return new DuckFrame(job,"SELECT "+String.join(",",selected.stream().map(DuckExpr::quote).toList())+" FROM ("+plan+") zd",List.of());}
   public Frame selectZeroColumns(){return new DuckFrame(job,"SELECT 1 AS \"__zingg_zero_column_sentinel\" FROM ("+plan+") zd",List.of(),scope,true);}
   public Frame selectExpr(String... e){
     if(e==null||e.length==0)throw new DuckException("selectExpr requires expressions");
@@ -105,7 +190,17 @@ final class DuckFrame implements Frame {
   }
   public Frame filter(Expression e){return q("SELECT * FROM ("+plan+") zd WHERE "+SqlSafety.predicate(e.sql()));}
   public Frame filterInCond(Frame values,String left,String right){same(values);return q("SELECT l.* FROM ("+plan+") l JOIN ("+((DuckFrame)values).plan+") r ON l."+DuckExpr.quote(left)+" = r."+DuckExpr.quote(right));}
-  public Frame explode(String list,String output){return q("SELECT zd.* EXCLUDE ("+DuckExpr.quote(list)+"), u.value AS "+DuckExpr.quote(output)+" FROM ("+plan+") zd, UNNEST("+DuckExpr.quote(list)+") u");}
+  public Frame explode(String list,String output){
+    if(list==null||list.isBlank()||output==null||output.isBlank())throw new DuckException("explode columns are required");
+    var available=availableColumns();String source=matchingIdentifier(available,list);
+    if(source==null)throw new DuckException("explode column is not present: "+list);
+    String existingOutput=matchingIdentifier(available,output);
+    if(existingOutput!=null&&!existingOutput.equalsIgnoreCase(source))
+      throw new DuckException("explode result column already exists: "+output);
+    // UNNEST replaces one input column with one output column, but the output
+    // name can differ. Do not carry the input schema cache across this change.
+    return new DuckFrame(job,"SELECT zd.* EXCLUDE ("+DuckExpr.quote(source)+"), u.value AS "+DuckExpr.quote(output)+" FROM ("+plan+") zd, UNNEST("+DuckExpr.quote(source)+") AS u(value)",List.of());
+  }
   public Frame sort(String... e){if(e==null||e.length==0)throw new DuckException("sort requires expressions");return q("SELECT * FROM ("+plan+") zd ORDER BY "+String.join(",",Arrays.stream(e).map(SqlSafety::predicate).toList()));}
   public Frame limit(long rows){if(rows<0)throw new DuckException("limit cannot be negative");return q("SELECT * FROM ("+plan+") zd LIMIT "+rows);}
   public SplitResult partitionByPredicate(Expression e){if(e==null)throw new DuckException("partition predicate is required");String p=SqlSafety.predicate(e.sql());return new SplitResult(q("SELECT * FROM ("+plan+") zd WHERE "+p),q("SELECT * FROM ("+plan+") zd WHERE NOT ("+p+")"));}
@@ -116,32 +211,50 @@ final class DuckFrame implements Frame {
   public <T> Frame withColumn(String name,T value){
     if(name==null||name.isBlank())throw new DuckException("column name is required");
     DuckExpr e=value instanceof Expression expression
-        ?new DuckExpr(SqlSafety.predicate(expression.sql())):DuckExpr.literal(value);
+        ?new DuckExpr(expression instanceof ValidatedModelExpression
+            ? expression.sql() : SqlSafety.predicate(expression.sql())):DuckExpr.literal(value);
     var available=availableColumns();
-    String prefix=zeroColumns?"SELECT ":available.contains(name)?"SELECT * EXCLUDE ("+DuckExpr.quote(name)+"), ":"SELECT *, ";
-    var updated=new ArrayList<>(available); if(!updated.contains(name))updated.add(name);
-    return new DuckFrame(job,""+prefix+e.sql()+" AS "+DuckExpr.quote(name)+" FROM ("+plan+") zd",updated);
+    String existing=matchingIdentifier(available,name);
+    String prefix=zeroColumns?"SELECT ":existing!=null?"SELECT * EXCLUDE ("+DuckExpr.quote(existing)+"), ":"SELECT *, ";
+    return new DuckFrame(job,prefix+e.sql()+" AS "+DuckExpr.quote(name)+" FROM ("+plan+") zd",List.of());
   }
-  public Frame drop(String... c){var d=new HashSet<>(Arrays.asList(c));var available=availableColumns();var remaining=available.stream().filter(x->!d.contains(x)).toList();if(remaining.isEmpty())return selectZeroColumns();return new DuckFrame(job,"SELECT "+String.join(",",remaining.stream().map(DuckExpr::quote).toList())+" FROM ("+plan+") zd",remaining);}
+  public Frame drop(String... c){var available=availableColumns();var d=new HashSet<String>();if(c!=null)for(String name:c)if(name!=null){String match=matchingIdentifier(available,name);if(match!=null)d.add(match);}var remaining=available.stream().filter(x->!d.contains(x)).toList();if(remaining.isEmpty())return selectZeroColumns();return new DuckFrame(job,"SELECT "+String.join(",",remaining.stream().map(DuckExpr::quote).toList())+" FROM ("+plan+") zd",remaining);}
   public Frame rename(String from,String to){
     if(from==null||from.isBlank()||to==null||to.isBlank())throw new DuckException("rename columns are required");
     var available=availableColumns();
-    if(!available.contains(from))throw new DuckException("renamed column is not present: "+from);
-    if(available.contains(to)&&!from.equals(to))throw new DuckException("rename target already exists: "+to);
-    var renamed=new ArrayList<>(available); renamed.set(renamed.indexOf(from),to);
-    return new DuckFrame(job,"SELECT * EXCLUDE ("+DuckExpr.quote(from)+"), "+DuckExpr.quote(from)+" AS "+DuckExpr.quote(to)+" FROM ("+plan+") zd",renamed);
+    String source=matchingIdentifier(available,from);
+    if(source==null)throw new DuckException("renamed column is not present: "+from);
+    String target=matchingIdentifier(available,to);
+    if(target!=null&&!target.equalsIgnoreCase(source))throw new DuckException("rename target already exists: "+to);
+    return new DuckFrame(job,"SELECT * EXCLUDE ("+DuckExpr.quote(source)+"), "+DuckExpr.quote(source)+" AS "+DuckExpr.quote(to)+" FROM ("+plan+") zd",List.of());
   }
   public Frame join(Frame right,String condition){return join(right,condition,"inner");}
-  public Frame join(Frame right,String condition,String joinType){same(right);DuckFrame other=(DuckFrame)right;var leftColumns=availableColumns();var rightColumns=other.availableColumns();var output=new ArrayList<String>(leftColumns);output.addAll(rightColumns);String type=joinType(joinType);if(!zeroColumns&&!other.zeroColumns)return new DuckFrame(job,"SELECT * FROM ("+plan+") l "+type+" JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition),output);var projections=new ArrayList<String>();for(String column:leftColumns)projections.add("l."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));for(String column:rightColumns)projections.add("r."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));boolean zeroOutput=projections.isEmpty();if(zeroOutput)projections.add("1 AS \"__zingg_zero_column_sentinel\"");return new DuckFrame(job,"SELECT "+String.join(",",projections)+" FROM ("+plan+") l "+type+" JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition),output,RelationScope.QUERY_ONLY,zeroOutput);}
-  public Frame joinUsing(Frame right,String joinType,String... joinColumns){same(right);if(joinColumns==null||joinColumns.length==0)throw new DuckException("join columns are required");var leftColumns=availableColumns();var rightColumns=((DuckFrame)right).availableColumns();for(String column:joinColumns){if(column==null||!leftColumns.contains(column)||!rightColumns.contains(column))throw new DuckException("join column must exist on both frames: "+column);}String using=String.join(",",Arrays.stream(joinColumns).map(DuckExpr::quote).toList());var output=new ArrayList<String>(leftColumns);for(String column:rightColumns)if(!Arrays.asList(joinColumns).contains(column))output.add(column);return new DuckFrame(job,"SELECT * FROM ("+plan+") l "+joinType(joinType)+" JOIN ("+((DuckFrame)right).plan+") r USING ("+using+")",output);}
+  public Frame join(Frame right,String condition,String joinType){same(right);DuckFrame other=(DuckFrame)right;var leftColumns=availableColumns();var rightColumns=other.availableColumns();String type=joinType(joinType);if(!zeroColumns&&!other.zeroColumns)return new DuckFrame(job,"SELECT * FROM ("+plan+") l "+type+" JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition),List.of());var projections=new ArrayList<String>();for(String column:leftColumns)projections.add("l."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));for(String column:rightColumns)projections.add("r."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));boolean zeroOutput=projections.isEmpty();if(zeroOutput)projections.add("1 AS \"__zingg_zero_column_sentinel\"");return new DuckFrame(job,"SELECT "+String.join(",",projections)+" FROM ("+plan+") l "+type+" JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition),List.of(),RelationScope.QUERY_ONLY,zeroOutput);}
+  public Frame joinUsing(Frame right,String joinType,String... joinColumns){same(right);if(joinColumns==null||joinColumns.length==0)throw new DuckException("join columns are required");var leftColumns=availableColumns();var rightColumns=((DuckFrame)right).availableColumns();var resolved=new ArrayList<String>(joinColumns.length);for(String column:joinColumns){String left=column==null?null:matchingIdentifier(leftColumns,column);String other=column==null?null:matchingIdentifier(rightColumns,column);if(left==null||other==null)throw new DuckException("join column must exist on both frames: "+column);resolved.add(left);}String using=String.join(",",resolved.stream().map(DuckExpr::quote).toList());return new DuckFrame(job,"SELECT * FROM ("+plan+") l "+joinType(joinType)+" JOIN ("+((DuckFrame)right).plan+") r USING ("+using+")",List.of());}
   public Frame joinProjected(Frame right,String condition,String rightPrefix){
     same(right); if(rightPrefix==null||rightPrefix.isBlank())throw new DuckException("right column prefix is required");
     DuckFrame other=(DuckFrame)right; var leftColumns=availableColumns(); var rightColumns=other.availableColumns();
     var output=new ArrayList<String>(leftColumns); var projections=new ArrayList<String>();
     for(String column:leftColumns){projections.add("l."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));}
-    for(String column:rightColumns){String alias=rightPrefix+column;if(output.contains(alias))throw new DuckException("projected pair column collision: "+alias);projections.add("r."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(alias));output.add(alias);}
+    for(String column:rightColumns){String alias=rightPrefix+column;if(matchingIdentifier(output,alias)!=null)throw new DuckException("projected pair column collision: "+alias);projections.add("r."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(alias));output.add(alias);}
     boolean zeroOutput=projections.isEmpty();if(zeroOutput)projections.add("1 AS \"__zingg_zero_column_sentinel\"");
     return new DuckFrame(job,"SELECT "+String.join(",",projections)+" FROM ("+plan+") l JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition),output,RelationScope.QUERY_ONLY,zeroOutput);
+  }
+  /** Attach a bounded pair-to-label relation without generating a giant CASE expression. */
+  public Frame withDecisionMapping(String leftColumn, String rightColumn, String outputColumn,
+      List<List<Object>> rows) {
+    if (rows == null || rows.isEmpty()) throw new DuckException("decision mapping is empty");
+    String table = "z_label_map_" + UUID.randomUUID().toString().replace("-", "");
+    job.createFrame(table, List.of("left_id", "right_id", "label"),
+        List.of("VARCHAR", "VARCHAR", "BIGINT"), rows);
+    DuckFrame mapping = (DuckFrame) job.table(table);
+    String prefix = "__z_label_";
+    return joinProjected(mapping,
+            "l." + DuckExpr.quote(leftColumn) + " = r." + DuckExpr.quote("left_id")
+                + " AND l." + DuckExpr.quote(rightColumn) + " = r." + DuckExpr.quote("right_id"), prefix)
+        .withColumn(outputColumn, new DuckExpr(DuckExpr.quote(prefix + "label")))
+        .drop(prefix + "left_id", prefix + "right_id", prefix + "label")
+        .filter(new DuckExpr(DuckExpr.quote(outputColumn) + " IS NOT NULL"));
   }
   public Frame union(Frame other,boolean byName,boolean allowMissing){
     same(other);
@@ -164,7 +277,7 @@ final class DuckFrame implements Frame {
   public Frame except(Frame other){same(other);DuckFrame right=(DuckFrame)other;if(availableColumns().size()!=right.availableColumns().size())throw new DuckException("EXCEPT requires equal column counts");return new DuckFrame(job,"("+plan+") EXCEPT ("+right.plan+")",availableColumns(),RelationScope.QUERY_ONLY,zeroColumns&&right.zeroColumns);}
   public Frame intersect(Frame other){same(other);DuckFrame right=(DuckFrame)other;if(availableColumns().size()!=right.availableColumns().size())throw new DuckException("INTERSECT requires equal column counts");return new DuckFrame(job,"("+plan+") INTERSECT ("+right.plan+")",availableColumns(),RelationScope.QUERY_ONLY,zeroColumns&&right.zeroColumns);}
   public Frame distinct(){return q("SELECT DISTINCT * FROM ("+plan+") zd");}
-  public Frame dropDuplicates(String... subset){if(subset==null||subset.length==0)return distinct();var available=availableColumns();for(String column:subset)if(column==null||!available.contains(column))throw new DuckException("duplicate subset column is not present: "+column);String partition=String.join(",",Arrays.stream(subset).map(DuckExpr::quote).toList());return q("SELECT * FROM ("+plan+") zd QUALIFY ROW_NUMBER() OVER (PARTITION BY "+partition+" ORDER BY "+partition+") = 1");}
+  public Frame dropDuplicates(String... subset){if(subset==null||subset.length==0)return distinct();var available=availableColumns();var resolved=Arrays.stream(subset).map(column->{String match=column==null?null:matchingIdentifier(available,column);if(match==null)throw new DuckException("duplicate subset column is not present: "+column);return match;}).toList();String partition=String.join(",",resolved.stream().map(DuckExpr::quote).toList());return q("SELECT * FROM ("+plan+") zd QUALIFY ROW_NUMBER() OVER (PARTITION BY "+partition+" ORDER BY "+partition+") = 1");}
   public Frame sample(boolean withReplacement,double fraction){
     if(!Double.isFinite(fraction)||fraction<0)throw new DuckException("sample fraction must be finite and non-negative");
     if(!withReplacement){if(fraction==0)return filter(new DuckExpr("FALSE"));if(fraction>=1)return this;return filter(new DuckExpr("random() < "+Double.toString(fraction)));}
@@ -197,30 +310,36 @@ final class DuckFrame implements Frame {
   public void writeJson(java.nio.file.Path output){copy(output,"FORMAT JSON, ARRAY true");}
   public void writeArrow(java.nio.file.Path output){writeArrowIpc(output);}
   private void copy(java.nio.file.Path output,String options){
+    job.checkCancelled();
     if(zeroColumns)throw new DuckException("cannot export a zero-column frame");
     java.nio.file.Path temporary=null;
     try{
       PathPolicySupport.createParent(output);
       var parent=output.toAbsolutePath().normalize().getParent();
       temporary=Files.createTempFile(parent, output.getFileName().toString()+".", ".partial");
-      try(var s=job.createStatement()){
-        s.execute("COPY ("+plan+") TO "+DuckPath.sqlLiteral(temporary)+" ("+options+")");
+      try(var s=job.createStatement(); var guard=new OutputByteGuard(temporary,job.budget(),s,job.tempDirectory())){
+        try { s.execute("COPY ("+plan+") TO "+DuckPath.sqlLiteral(temporary)+" ("+options+")"); }
+        catch(SQLException e) { job.checkCancelled(); guard.throwIfExceeded(); throw e; }
+        guard.throwIfExceeded();
       }
       if(Files.exists(temporary))job.budget().enforceOutputBytes(Files.size(temporary));
-      try{Files.move(temporary,output,java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);}
-      catch(java.nio.file.AtomicMoveNotSupportedException e){Files.move(temporary,output,java.nio.file.StandardCopyOption.REPLACE_EXISTING);}
+      job.checkCancelled();
+      outputPublisher.publish(temporary,output);
       temporary=null;
     }catch(SQLException|java.io.IOException e){throw new DuckException("write failed",e);}
     finally{if(temporary!=null)try{Files.deleteIfExists(temporary);}catch(java.io.IOException ignored){}}
   }
   private void writeArrowIpc(java.nio.file.Path output){
+    job.checkCancelled();
     if(zeroColumns)throw new DuckException("cannot export a zero-column frame");
     java.nio.file.Path temporary=null;
+    OutputByteGuard[] activeGuard=new OutputByteGuard[1];
     try{
       PathPolicySupport.createParent(output);
       var parent=output.toAbsolutePath().normalize().getParent();
       temporary=Files.createTempFile(parent, output.getFileName().toString()+".", ".partial");
-      try(var s=job.createStatement(); var r=s.executeQuery("SELECT * FROM ("+plan+") zd")){
+      try(var s=job.createStatement(); var guard=activeGuard[0]=new OutputByteGuard(temporary,job.budget(),s,job.tempDirectory());
+          var r=s.executeQuery("SELECT * FROM ("+plan+") zd")){
         var metadata=r.getMetaData();
         var fields=new ArrayList<Field>();
         for(int i=1;i<=metadata.getColumnCount();i++) fields.add(new Field(metadata.getColumnName(i), FieldType.nullable(arrowType(metadata, i)), null));
@@ -244,12 +363,17 @@ final class DuckFrame implements Frame {
           writer.writeBatch();
           writer.end();
         }
+        guard.throwIfExceeded();
       }
       job.budget().enforceOutputBytes(Files.size(temporary));
-      try{Files.move(temporary,output,java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);}
-      catch(java.nio.file.AtomicMoveNotSupportedException e){Files.move(temporary,output,java.nio.file.StandardCopyOption.REPLACE_EXISTING);}
+      job.checkCancelled();
+      outputPublisher.publish(temporary,output);
       temporary=null;
-    }catch(SQLException|java.io.IOException e){throw new DuckException("write Arrow failed",e);}
+    }catch(SQLException e){
+      job.checkCancelled();
+      if(activeGuard[0]!=null)activeGuard[0].throwIfExceeded();
+      throw new DuckException("write Arrow failed",e);
+    }catch(java.io.IOException e){throw new DuckException("write Arrow failed",e);}
     finally{if(temporary!=null)try{Files.deleteIfExists(temporary);}catch(java.io.IOException ignored){}}
   }
   private static org.apache.arrow.vector.types.pojo.ArrowType arrowType(ResultSetMetaData metadata, int column) throws SQLException{

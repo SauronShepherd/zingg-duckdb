@@ -2,6 +2,7 @@ package io.zingg.duckdb.compat;
 
 import io.zingg.duckdb.api.*; import java.io.IOException; import java.nio.file.*;
 import io.zingg.duckdb.engine.DuckCancellation;
+import io.zingg.duckdb.engine.ResourceBudget;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.LinkOption;
@@ -62,7 +63,7 @@ public final class ZinggPipeline {
         throw new DuckException("classifier model load failed",e);
       }
     }
-    try(var job=new ZinggJob(runtime)){
+    try(var job=new ZinggJob(runtime,withOutputLimit(runtime.budget(),config.maxOutputBytes()))){
       Frame input=job.read(config.inputs(),config.phase(),config.pathPolicy()); long in=input.count();
       // The explicit MATCH scorer and a registered phase executor are
       // alternatives. A registered MATCH executor already owns scoring.
@@ -78,6 +79,13 @@ public final class ZinggPipeline {
       write(output,outputPath,config.maxOutputBytes(),atomicMover,outputLockObserver);
       return new PipelineResult(in,outputRows,config.phase().name(),outputPath.toString());
     }
+  }
+  private static ResourceBudget withOutputLimit(ResourceBudget configured,long pipelineLimit){
+    if(pipelineLimit<=0)return configured;
+    long runtimeLimit=configured.maxOutputBytes();
+    long effective=runtimeLimit<=0?pipelineLimit:Math.min(runtimeLimit,pipelineLimit);
+    return new ResourceBudget(configured.memoryLimitBytes(),configured.maxRows(),configured.maxInputBytes(),
+        effective,configured.maxCollectBytes(),configured.maxSpillBytes());
   }
   private static void write(Frame frame,Path output,long maxBytes,AtomicMover atomicMover,
       OutputLockObserver outputLockObserver){

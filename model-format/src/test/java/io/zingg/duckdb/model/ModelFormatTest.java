@@ -58,6 +58,25 @@ class ModelFormatTest {
   }
 
   @Test
+  void modelArtifactByteBudgetRejectsBeforeCreatingStageOrDestination(@TempDir Path temp)
+      throws Exception {
+    Path output = temp.resolve("oversized-model");
+    byte[] payload = "{\"kind\":\"linear-classifier\",\"weights\":[1.0]}"
+        .getBytes(StandardCharsets.UTF_8);
+
+    IOException failure = assertThrows(IOException.class, () ->
+        new ModelArtifactWriter(output).write(classifierManifest(), payload, provenance(), 1));
+
+    assertTrue(failure.getMessage().startsWith("model artifact byte budget exceeded:"),
+        failure.toString());
+    assertFalse(Files.exists(output));
+    try (var siblings = Files.list(temp)) {
+      assertFalse(siblings.anyMatch(path -> path.getFileName().toString().startsWith(".model-artifact-")),
+          "budget rejection must happen before allocating a staging directory");
+    }
+  }
+
+  @Test
   void atomicMoveUnsupportedFailsClosedAndPreservesExistingArtifact(@TempDir Path temp)
       throws Exception {
     Path output = temp.resolve("model");
@@ -131,6 +150,36 @@ class ModelFormatTest {
     assertEquals("old-model", Files.readString(output.resolve("sentinel")));
     try (var siblings = Files.list(temp)) {
       assertFalse(siblings.anyMatch(path -> path.getFileName().toString().contains(".previous-")));
+    }
+  }
+
+  @Test
+  void backupMoveThatCompletesThenThrowsRestoresPreviousArtifact(@TempDir Path temp)
+      throws Exception {
+    Path output = temp.resolve("model");
+    Files.createDirectory(output);
+    Files.writeString(output.resolve("sentinel"), "old-model");
+    boolean[] failAfterBackupMove = {true};
+    var mover = (ModelArtifactWriter.AtomicMover) (source, target) -> {
+      Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+      if (failAfterBackupMove[0] && source.equals(output)) {
+        failAfterBackupMove[0] = false;
+        throw new IOException("injected error after completed backup move");
+      }
+    };
+    var writer = new ModelArtifactWriter(output, mover, ModelFormatTest::deleteTree);
+
+    IOException failure = assertThrows(IOException.class, () -> writer.write(classifierManifest(),
+        "{\"kind\":\"linear-classifier\"}".getBytes(StandardCharsets.UTF_8), provenance()));
+    assertEquals("injected error after completed backup move", failure.getMessage());
+    assertEquals("old-model", Files.readString(output.resolve("sentinel")),
+        "the previous artifact must be restored even when its completed move reports failure");
+    try (var siblings = Files.list(temp)) {
+      var paths = siblings.toList();
+      assertFalse(paths.stream().anyMatch(path -> path.getFileName().toString().startsWith(".model-artifact-")),
+          "the staged artifact must be removed");
+      assertFalse(paths.stream().anyMatch(path -> path.getFileName().toString().contains(".previous-")),
+          "the restored backup must not remain orphaned");
     }
   }
 

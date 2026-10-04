@@ -65,9 +65,16 @@ public final class ModelArtifactWriter {
 
   public Path write(ModelManifest manifest, byte[] payload, ImportProvenance provenance)
       throws IOException {
+    return write(manifest, payload, provenance, 0);
+  }
+
+  /** Writes only if the complete staged artifact fits the optional byte limit. */
+  public Path write(ModelManifest manifest, byte[] payload, ImportProvenance provenance,
+      long maxArtifactBytes) throws IOException {
     Objects.requireNonNull(manifest, "manifest");
     Objects.requireNonNull(payload, "payload");
     Objects.requireNonNull(provenance, "provenance");
+    if (maxArtifactBytes < 0) throw new IllegalArgumentException("artifact byte limit cannot be negative");
     ModelFormat.requireSupported(manifest.formatVersion());
     Path parent = root.getParent();
     if (parent == null || root.getFileName() == null)
@@ -81,6 +88,17 @@ public final class ModelArtifactWriter {
     String checksum = NativeModelStore.sha256(payload);
     ModelManifest stamped = new ModelManifest(manifest.profile(), manifest.zinggVersion(),
         manifest.formatVersion(), manifest.modelType(), manifest.features(), checksum);
+    long stagedBytes;
+    try {
+      stagedBytes = Math.addExact(payload.length,
+          Math.addExact(NativeModelStore.toJson(stamped).getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+              provenanceJson(provenance, checksum).getBytes(java.nio.charset.StandardCharsets.UTF_8).length));
+    } catch (ArithmeticException overflow) {
+      throw new IOException("model artifact byte size overflow", overflow);
+    }
+    if (maxArtifactBytes > 0 && stagedBytes > maxArtifactBytes)
+      throw new IOException("model artifact byte budget exceeded: " + stagedBytes + " > "
+          + maxArtifactBytes + " bytes");
     Path stage = Files.createTempDirectory(parent, ".model-artifact-");
     Throwable primaryFailure = null;
     try {
@@ -107,6 +125,7 @@ public final class ModelArtifactWriter {
   private void publish(Path stage, ModelManifest manifest, ImportProvenance provenance,
       byte[] payload) throws IOException {
     Path backup = root.resolveSibling("." + root.getFileName() + ".previous-" + UUID.randomUUID());
+    boolean hadPrevious = Files.exists(root, LinkOption.NOFOLLOW_LINKS);
     boolean movedOld = false;
     boolean publishedNew = false;
     try {
@@ -124,6 +143,12 @@ public final class ModelArtifactWriter {
       verifyPublished(manifest, provenance, payload);
       checkCancelled();
     } catch (IOException | RuntimeException failure) {
+      // As with the staged-directory move below, a filesystem provider can
+      // complete the old-directory rename before surfacing an error. If the
+      // unique backup now exists and the destination disappeared, restoration
+      // is required even though the mover call did not return normally.
+      if (!movedOld && hadPrevious && !Files.exists(root, LinkOption.NOFOLLOW_LINKS)
+          && Files.exists(backup, LinkOption.NOFOLLOW_LINKS)) movedOld = true;
       // A provider may complete a move before reporting an error. Detect the
       // staged-directory rename by the disappearance of the private stage path.
       if (!publishedNew && !Files.exists(stage, LinkOption.NOFOLLOW_LINKS)

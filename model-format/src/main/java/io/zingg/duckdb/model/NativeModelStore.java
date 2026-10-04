@@ -24,6 +24,6 @@ public final class NativeModelStore {
    if(channel.size()!=size)throw new IOException("model payload changed while being read");return bytes.array();
   }
  }
- private static String toJson(ModelManifest m){String features=m.features().stream().map(ModelArtifactJson::quote).collect(java.util.stream.Collectors.joining(",","[","]"));return "{\"profile\":"+ModelArtifactJson.quote(m.profile())+",\"zinggVersion\":"+ModelArtifactJson.quote(m.zinggVersion())+",\"formatVersion\":"+ModelArtifactJson.quote(m.formatVersion())+",\"modelType\":"+ModelArtifactJson.quote(m.modelType())+",\"features\":"+features+",\"sha256\":"+ModelArtifactJson.quote(m.sha256())+"}";}
+ static String toJson(ModelManifest m){String features=m.features().stream().map(ModelArtifactJson::quote).collect(java.util.stream.Collectors.joining(",","[","]"));return "{\"profile\":"+ModelArtifactJson.quote(m.profile())+",\"zinggVersion\":"+ModelArtifactJson.quote(m.zinggVersion())+",\"formatVersion\":"+ModelArtifactJson.quote(m.formatVersion())+",\"modelType\":"+ModelArtifactJson.quote(m.modelType())+",\"features\":"+features+",\"sha256\":"+ModelArtifactJson.quote(m.sha256())+"}";}
  public static String sha256(byte[] b){try{var d=MessageDigest.getInstance("SHA-256");return HexFormat.of().formatHex(d.digest(b));}catch(Exception e){throw new DuckException("cannot hash model",e);}}
 }

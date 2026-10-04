@@ -31,11 +31,13 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
   private static final int MAGIC_V1 = 0x5a4c4431; // ZLD1, applied requests only
   private static final int MAGIC_V2 = 0x5a4c4432; // ZLD2, pending queue and delivery receipts
   private static final int MAGIC_V3 = 0x5a4c4433; // ZLD3, idempotent enqueue receipts
+  private static final int JOURNAL_MAGIC_V1 = 0x5a4c4a31; // ZLJ1, append-only applied requests
   private static final int MAX_BYTES = 64 * 1024 * 1024;
   private static final int MAX_ENTRIES = 100_000;
   private static final ReentrantLock JVM_LOCK = new ReentrantLock();
   private final Path directory;
   private final Path snapshot;
+  private final Path appliedJournal;
   private final Path lockFile;
   private final SnapshotWriteObserver writeObserver;
   private InMemoryLabelDecisionProvider delegate;
@@ -72,11 +74,12 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
     this.directory = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
     this.writeObserver = Objects.requireNonNull(writeObserver, "writeObserver");
     this.snapshot = this.directory.resolve("labels.bin");
+    this.appliedJournal = this.directory.resolve("labels.applied.log");
     this.lockFile = this.directory.resolve("labels.lock");
     try {
       Files.createDirectories(this.directory);
       if (Files.isSymbolicLink(this.directory) || Files.isSymbolicLink(snapshot)
-          || Files.isSymbolicLink(lockFile))
+          || Files.isSymbolicLink(lockFile) || Files.isSymbolicLink(appliedJournal))
         throw new DuckException("label snapshot cannot be a symbolic link");
       JVM_LOCK.lock();
       try (var channel = openLockChannel();
@@ -196,9 +199,11 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
       var staged = replay(current.applied());
       ApplyLabelsResult result = staged.applyLabels(request);
       if (!result.replay()) {
-        var next = new ArrayList<>(current.applied());
-        next.add(request);
-        writeSnapshot(new Snapshot(List.copyOf(next), current.pending(), current.deliveries(), current.enqueues()));
+        // Keep the established on-disk bootstrap contract (a first write
+        // creates labels.bin), then append subsequent applied requests as
+        // durable deltas instead of rewriting the cumulative snapshot.
+        if (!Files.exists(snapshot, LinkOption.NOFOLLOW_LINKS)) writeSnapshot(current);
+        appendAppliedRequest(request);
       }
       delegate = staged;
       return result;
@@ -216,9 +221,139 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
   }
 
   private Snapshot currentSnapshot() throws IOException {
-    if (Files.isSymbolicLink(snapshot) || Files.isSymbolicLink(lockFile))
+    if (Files.isSymbolicLink(snapshot) || Files.isSymbolicLink(lockFile)
+        || Files.isSymbolicLink(appliedJournal))
       throw new DuckException("label snapshot cannot be a symbolic link");
-    return Files.exists(snapshot, LinkOption.NOFOLLOW_LINKS) ? readSnapshot() : Snapshot.empty();
+    Snapshot base = Files.exists(snapshot, LinkOption.NOFOLLOW_LINKS) ? readSnapshot() : Snapshot.empty();
+    if (!Files.exists(appliedJournal, LinkOption.NOFOLLOW_LINKS)) return base;
+    var applied = new ArrayList<>(base.applied());
+    var keys = new HashSet<String>();
+    for (ApplyLabelsRequest request : applied) keys.add(request.idempotencyKey());
+    for (ApplyLabelsRequest request : readAppliedJournal()) {
+      if (!keys.add(request.idempotencyKey())) {
+        if (applied.stream().noneMatch(existing -> existing.idempotencyKey().equals(request.idempotencyKey())
+            && existing.equals(request)))
+          throw new DuckException("applied request journal conflicts with snapshot");
+        continue;
+      }
+      applied.add(request);
+    }
+    return new Snapshot(List.copyOf(applied), base.pending(), base.deliveries(), base.enqueues());
+  }
+
+  /**
+   * Applied-label requests are append-only deltas. Pending delivery state still
+   * uses the checksummed snapshot because it is a queue mutation, while the
+   * high-volume label stream no longer rewrites every historical request.
+   */
+  private void appendAppliedRequest(ApplyLabelsRequest request) {
+    try {
+      byte[] payload = encodeAppliedRequest(request);
+      if (payload.length > MAX_BYTES - 44) throw new DuckException("label journal record is too large");
+      var envelope = new ByteArrayOutputStream(payload.length + 44);
+      try (var data = new DataOutputStream(envelope)) {
+        data.writeInt(JOURNAL_MAGIC_V1);
+        data.writeInt(payload.length);
+        data.write(payload);
+        data.write(sha256(payload));
+      }
+      byte[] record = envelope.toByteArray();
+      try (var channel = openAppliedJournalChannel()) {
+        byte[] existing = Files.exists(appliedJournal, LinkOption.NOFOLLOW_LINKS)
+            ? Files.readAllBytes(appliedJournal) : new byte[0];
+        long valid = validJournalLength(existing);
+        if (valid + record.length > MAX_BYTES)
+          throw new DuckException("label journal exceeds size limit");
+        channel.truncate(valid);
+        channel.position(valid);
+        var bytes = ByteBuffer.wrap(record);
+        while (bytes.hasRemaining()) channel.write(bytes);
+        channel.force(true);
+      }
+    } catch (IOException e) {
+      throw new DuckException("applied label journal cannot be persisted", e);
+    }
+  }
+
+  private List<ApplyLabelsRequest> readAppliedJournal() throws IOException {
+    byte[] bytes = Files.readAllBytes(appliedJournal);
+    if (bytes.length > MAX_BYTES) throw new DuckException("label journal size is invalid");
+    var result = new ArrayList<ApplyLabelsRequest>();
+    int offset = 0;
+    while (offset + 8 <= bytes.length) {
+      int magic = java.nio.ByteBuffer.wrap(bytes, offset, 4).getInt();
+      int length = java.nio.ByteBuffer.wrap(bytes, offset + 4, 4).getInt();
+      if (magic != JOURNAL_MAGIC_V1 || length < 0 || length > MAX_BYTES - 44) break;
+      long end = (long) offset + 8L + length + 32L;
+      if (end > bytes.length) break; // an uncommitted final append
+      byte[] payload = java.util.Arrays.copyOfRange(bytes, offset + 8, offset + 8 + length);
+      byte[] digest = java.util.Arrays.copyOfRange(bytes, offset + 8 + length, (int) end);
+      if (!MessageDigest.isEqual(digest, sha256(payload)))
+        throw new DuckException("label journal checksum mismatch");
+      try (var data = new DataInputStream(new ByteArrayInputStream(payload))) {
+        result.add(readAppliedRequest(data));
+        if (data.available() != 0) throw new DuckException("label journal record has trailing data");
+      }
+      offset = (int) end;
+    }
+    return List.copyOf(result);
+  }
+
+  private static long validJournalLength(byte[] bytes) throws IOException {
+    int offset = 0;
+    while (offset + 8 <= bytes.length) {
+      int magic = java.nio.ByteBuffer.wrap(bytes, offset, 4).getInt();
+      int length = java.nio.ByteBuffer.wrap(bytes, offset + 4, 4).getInt();
+      if (magic != JOURNAL_MAGIC_V1 || length < 0 || length > MAX_BYTES - 44) break;
+      long end = (long) offset + 8L + length + 32L;
+      if (end > bytes.length) break;
+      byte[] payload = java.util.Arrays.copyOfRange(bytes, offset + 8, offset + 8 + length);
+      byte[] digest = java.util.Arrays.copyOfRange(bytes, offset + 8 + length, (int) end);
+      if (!MessageDigest.isEqual(digest, sha256(payload)))
+        throw new DuckException("label journal checksum mismatch");
+      offset = (int) end;
+    }
+    return offset;
+  }
+
+  private FileChannel openAppliedJournalChannel() throws IOException {
+    FileChannel channel;
+    try {
+      channel = FileChannel.open(appliedJournal, java.util.Set.<OpenOption>of(StandardOpenOption.CREATE,
+          StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS),
+          PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+    } catch (UnsupportedOperationException unsupported) {
+      channel = FileChannel.open(appliedJournal, StandardOpenOption.CREATE, StandardOpenOption.READ,
+          StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+    }
+    try {
+      requirePrivatePosixPermissions(appliedJournal);
+      return channel;
+    } catch (IOException | RuntimeException failure) {
+      channel.close();
+      throw failure;
+    }
+  }
+
+  private static byte[] encodeAppliedRequest(ApplyLabelsRequest request) throws IOException {
+    var bytes = new ByteArrayOutputStream();
+    try (var data = new DataOutputStream(bytes)) {
+      writeAppliedRequest(data, request);
+    }
+    return bytes.toByteArray();
+  }
+
+  private static ApplyLabelsRequest readAppliedRequest(DataInputStream data) throws IOException {
+    String requestId = data.readUTF(), schema = data.readUTF(), key = data.readUTF();
+    int decisionCount = data.readInt();
+    if (decisionCount < 0 || decisionCount > MAX_ENTRIES)
+      throw new DuckException("label journal decision count is invalid");
+    var decisions = new ArrayList<LabelDecision>(decisionCount);
+    for (int i = 0; i < decisionCount; i++) {
+      decisions.add(new LabelDecision(data.readUTF(), data.readUTF(),
+          Decision.valueOf(data.readUTF()), data.readUTF()));
+    }
+    return new ApplyLabelsRequest(requestId, schema, key, decisions);
   }
 
   FileChannel openLockChannel() throws IOException {
@@ -351,18 +486,7 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
             || state.deliveries().size() > MAX_ENTRIES || state.enqueues().size() > MAX_ENTRIES)
           throw new DuckException("label snapshot entry count exceeds limit");
         data.writeInt(state.applied().size());
-        for (var request : state.applied()) {
-          data.writeUTF(request.requestId());
-          data.writeUTF(request.schemaVersion());
-          data.writeUTF(request.idempotencyKey());
-          data.writeInt(request.decisions().size());
-          for (var decision : request.decisions()) {
-            data.writeUTF(decision.leftId());
-            data.writeUTF(decision.rightId());
-            data.writeUTF(decision.decision().name());
-            data.writeUTF(decision.source());
-          }
-        }
+        for (var request : state.applied()) writeAppliedRequest(data, request);
         data.writeInt(state.pending().size());
         for (var label : state.pending()) writePendingLabel(data, label);
         data.writeInt(state.deliveries().size());
@@ -405,11 +529,34 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
       writeObserver.after(SnapshotWriteStage.AFTER_TEMP_FORCE);
       replaceAtomically(temporary, snapshot);
       writeObserver.after(SnapshotWriteStage.AFTER_ATOMIC_MOVE);
+      clearAppliedJournal();
     } catch (AtomicMoveNotSupportedException e) {
       throw new DuckException("atomic label snapshot replacement is unavailable", e);
     } catch (IOException e) { throw new DuckException("label snapshot cannot be persisted", e); }
     finally {
       if (temporary != null) try { Files.deleteIfExists(temporary); } catch (IOException ignored) { }
+    }
+  }
+
+  private static void writeAppliedRequest(DataOutputStream data, ApplyLabelsRequest request)
+      throws IOException {
+    data.writeUTF(request.requestId());
+    data.writeUTF(request.schemaVersion());
+    data.writeUTF(request.idempotencyKey());
+    data.writeInt(request.decisions().size());
+    for (var decision : request.decisions()) {
+      data.writeUTF(decision.leftId());
+      data.writeUTF(decision.rightId());
+      data.writeUTF(decision.decision().name());
+      data.writeUTF(decision.source());
+    }
+  }
+
+  private void clearAppliedJournal() throws IOException {
+    if (!Files.exists(appliedJournal, LinkOption.NOFOLLOW_LINKS)) return;
+    try (var channel = openAppliedJournalChannel()) {
+      channel.truncate(0);
+      channel.force(true);
     }
   }
 

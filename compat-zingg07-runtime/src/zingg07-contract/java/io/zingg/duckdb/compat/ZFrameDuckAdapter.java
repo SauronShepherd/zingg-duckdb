@@ -5,6 +5,7 @@ import io.zingg.duckdb.api.DuckException;
 import io.zingg.duckdb.api.Frame;
 import io.zingg.duckdb.api.Row;
 import io.zingg.duckdb.api.Column;
+import io.zingg.duckdb.api.ColumnResolver;
 import io.zingg.duckdb.engine.DuckExpr;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -284,7 +285,8 @@ public final class ZFrameDuckAdapter implements InvocationHandler {
   private Object joinOnColumn(Object[] args) {
     Frame right = unwrap(zframe(args[0]));
     if (args[1] instanceof String key) return wrap(delegate.joinUsing(right, "inner", key));
-    return wrap(delegate.join(right, sql(args[1])));
+    ZFrameDuckAdapter rightAdapter = (ZFrameDuckAdapter) Proxy.getInvocationHandler(zframe(args[0]));
+    return joined(delegate.join(right, sql(args[1])), rightAdapter);
   }
 
   private Object joinRight(Object[] args) {
@@ -464,7 +466,7 @@ public final class ZFrameDuckAdapter implements InvocationHandler {
   }
 
   private int fieldIndex(String name) {
-    int index = columns().lastIndexOf(name);
+    int index = ColumnResolver.lastIndexOf(columns(), name);
     if (index < 0) throw new IllegalArgumentException("field does not exist: " + name);
     return index;
   }
@@ -474,7 +476,7 @@ public final class ZFrameDuckAdapter implements InvocationHandler {
     List<String> values = new ArrayList<>(rows.size());
     if (columns().isEmpty()) return values;
     String column = columns().get(0);
-    for (Row row : rows) values.add((String) row.get(column));
+    for (Row row : rows) values.add((String) row.values().get(0));
     return values;
   }
 

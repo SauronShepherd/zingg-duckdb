@@ -122,7 +122,7 @@ def main() -> None:
         train_failure(root, command_prefix, "duplicate-id", VALID_LABELS,
                       records_text="id,block,feature\n1,a,1\n2,a,-1\n2,a,-1\n3,a,1\n")
         train_failure(root, command_prefix, "missing-feature", VALID_LABELS, features=["missing-feature"],
-                      expected="feature is not present")
+                      expected="feature column is not present")
         train_failure(root, command_prefix, "missing-block", VALID_LABELS,
                       records_text="id,feature\n1,1\n2,-1\n3,1\n")
         model_failures(root, command_prefix)

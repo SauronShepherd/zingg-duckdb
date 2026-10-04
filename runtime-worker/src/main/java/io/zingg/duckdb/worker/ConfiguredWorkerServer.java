@@ -19,6 +19,8 @@ import java.util.concurrent.TimeUnit;
 
 /** Configured line-protocol server; diagnostics always retain the request id. */
 final class ConfiguredWorkerServer implements AutoCloseable {
+  private static final long SHUTDOWN_GRACE_MILLIS = 5_000L;
+  private static final long SHUTDOWN_FORCE_MILLIS = 1_000L;
   private final CompatibilityRuntime runtime;
   private final PathPolicy paths;
   private final long maxModelBytes; private final long maxOutputBytes; private final long maxRows; private final long maxCollectBytes; private final long maxSpillBytes;
@@ -74,8 +76,7 @@ final class ConfiguredWorkerServer implements AutoCloseable {
           continue;
         }
         if (message.operation().equals("shutdown")) {
-          executor.shutdown();
-          awaitRequests(executor);
+          stopRequests(executor, active);
           respond(out, writes, message.id(), "ok", "stopping");
           return;
         }
@@ -92,8 +93,7 @@ final class ConfiguredWorkerServer implements AutoCloseable {
         }
       }
     } finally {
-      executor.shutdown();
-      awaitRequests(executor);
+      stopRequests(executor, active);
     }
   }
 
@@ -132,7 +132,8 @@ final class ConfiguredWorkerServer implements AutoCloseable {
       }
       case "run" -> run(message.payload());
       case "run_v2" -> runV2(message.payload());
-      case "train" -> train(message.payload());
+      case "train_blocking" -> trainBlocking(message.payload());
+      case "train_classifier" -> trainClassifier(message.payload());
       case "train_from_labels" -> trainFromLabels(message.payload());
       case "apply_labels" -> applyLabels(requestId, message.payload());
       case "enqueue_pending_label" -> enqueuePendingLabel(message.payload());
@@ -152,13 +153,22 @@ final class ConfiguredWorkerServer implements AutoCloseable {
     }
   }
 
-  private static void awaitRequests(ExecutorService executor) {
+  private static void stopRequests(ExecutorService executor,
+      Map<String, DuckCancellation> active) {
+    executor.shutdown();
     boolean interrupted = false;
     try {
-      while (true) {
-        try {
-          if (executor.awaitTermination(1, TimeUnit.DAYS)) return;
-        } catch (InterruptedException e) { interrupted = true; }
+      try {
+        if (executor.awaitTermination(SHUTDOWN_GRACE_MILLIS, TimeUnit.MILLISECONDS)) return;
+      } catch (InterruptedException e) {
+        interrupted = true;
+      }
+      for (DuckCancellation cancellation : active.values()) cancellation.cancel();
+      executor.shutdownNow();
+      try {
+        executor.awaitTermination(SHUTDOWN_FORCE_MILLIS, TimeUnit.MILLISECONDS);
+      } catch (InterruptedException e) {
+        interrupted = true;
       }
     } finally {
       if (interrupted) Thread.currentThread().interrupt();
@@ -194,7 +204,7 @@ final class ConfiguredWorkerServer implements AutoCloseable {
   private String status() {
     var d=runtime.diagnostics();
     var policy=runtime.connectorPolicy();
-    return "memory_limit="+d.memoryLimit()+";max_temp_directory_size="+d.maxTempDirectorySize()+";temp_directory="+d.tempDirectory()+";threads="+d.threads()+";max_rows="+maxRows+";max_collect_bytes="+maxCollectBytes+";max_output_bytes="+maxOutputBytes+";max_spill_bytes="+maxSpillBytes+";heap_used_bytes="+d.heapUsedBytes()+";heap_max_bytes="+d.heapMaxBytes()+";process_resident_bytes="+d.processResidentBytes()+";temp_directory_used_bytes="+d.tempDirectoryUsedBytes()+";offline_mode="+policy.offlineMode()+";unsafe_debug_sql="+unsafeDebugSql+";allowed_extensions="+String.join(",",policy.allowedExtensions());
+    return "memory_limit="+d.memoryLimit()+";max_temp_directory_size="+d.maxTempDirectorySize()+";temp_directory="+d.tempDirectory()+";threads="+d.threads()+";max_rows="+maxRows+";max_input_bytes="+runtime.budget().maxInputBytes()+";max_collect_bytes="+maxCollectBytes+";max_output_bytes="+maxOutputBytes+";max_spill_bytes="+maxSpillBytes+";heap_used_bytes="+d.heapUsedBytes()+";heap_max_bytes="+d.heapMaxBytes()+";process_resident_bytes="+d.processResidentBytes()+";temp_directory_used_bytes="+d.tempDirectoryUsedBytes()+";offline_mode="+policy.offlineMode()+";unsafe_debug_sql="+unsafeDebugSql+";allowed_extensions="+String.join(",",policy.allowedExtensions());
   }
 
   private void requireUnsafeDebugSql(){if(!unsafeDebugSql)throw new IllegalArgumentException("count/explain SQL is disabled; restart with --unsafe-debug-sql for diagnostics only");}
@@ -220,22 +230,25 @@ final class ConfiguredWorkerServer implements AutoCloseable {
     return Long.toString(new ZinggPipeline(runtime).execute(config).outputRows());
   }
 
-  private String train(String payload) {
+  private String trainBlocking(String payload) {
     String[] p=PayloadCodec.decode(payload, -1);
-    if(p.length<6 && p.length!=10) throw new IllegalArgumentException("train payload requires 5 or 9 control fields plus input fields");
-    boolean classifier=p.length>=10;
-    int control=classifier?9:5;
-    if(p.length<=control) throw new IllegalArgumentException("train payload requires at least one input");
-    var inputs=Arrays.stream(p,control,p.length).filter(x->!x.isBlank()).map(Path::of).toList();
+    if(p.length<6) throw new IllegalArgumentException("train_blocking payload requires 5 control fields plus input fields");
+    var inputs=Arrays.stream(p,5,p.length).filter(x->!x.isBlank()).map(Path::of).toList();
     try(var job=new ZinggJob(runtime)) {
       var frame=job.read(inputs,ZinggJob.Phase.TRAIN,paths);
-      if (classifier) {
-        var features=Arrays.stream(p[3].split(",",-1)).filter(x->!x.isBlank()).toList();
-        var config=new NativeClassifierTrainer.Config(p[8],features,p[2],paths.output(Path.of(p[1])),Integer.parseInt(p[5]),Double.parseDouble(p[6]),Double.parseDouble(p[7]),Long.parseLong(p[4]));
-        return new NativeClassifierTrainer().train(frame,config).artifactDirectory().toString();
-      }
-      var config=new NativeTrainingConfig("zingg-0.7.0",p[2],p[3],List.of(),paths.output(Path.of(p[1])),Long.parseLong(p[4]));
+      var config=new NativeTrainingConfig("zingg-0.7.0",p[2],p[3],List.of(),paths.output(Path.of(p[1])),Long.parseLong(p[4]),maxOutputBytes);
       return job.trainNative(frame,config).artifactDirectory().toString();
+    }
+  }
+  private String trainClassifier(String payload) {
+    String[] p=PayloadCodec.decode(payload, -1);
+    if(p.length<10) throw new IllegalArgumentException("train_classifier payload requires 9 control fields plus input fields");
+    var inputs=Arrays.stream(p,9,p.length).filter(x->!x.isBlank()).map(Path::of).toList();
+    try(var job=new ZinggJob(runtime)) {
+      var frame=job.read(inputs,ZinggJob.Phase.TRAIN,paths);
+      var features=Arrays.stream(p[3].split(",",-1)).filter(x->!x.isBlank()).toList();
+      var config=new NativeClassifierTrainer.Config(p[8],features,p[2],paths.output(Path.of(p[1])),Integer.parseInt(p[5]),Double.parseDouble(p[6]),Double.parseDouble(p[7]),Long.parseLong(p[4]),maxOutputBytes);
+      return new NativeClassifierTrainer().train(frame,config).artifactDirectory().toString();
     }
   }
   private String applyLabels(String requestId,String payload) {
@@ -302,7 +315,7 @@ final class ConfiguredWorkerServer implements AutoCloseable {
     long rowLimit=Long.parseLong(p[5]);
     var features=Arrays.stream(p[3].split(",",-1)).filter(x->!x.isBlank()).toList();
     var config=new NativeClassifierTrainer.Config(p[9],features,p[4],paths.output(Path.of(p[0])),
-        Integer.parseInt(p[6]),Double.parseDouble(p[7]),Double.parseDouble(p[8]),rowLimit);
+        Integer.parseInt(p[6]),Double.parseDouble(p[7]),Double.parseDouble(p[8]),rowLimit,maxOutputBytes);
     try(var workflow=new PersistedMatchWorkflow(runtime)) {
       var input=workflow.read(inputs,ZinggJob.Phase.FIND_TRAINING_DATA,paths);
       String quoted="\""+p[2].replace("\"","\"\"")+"\"";
