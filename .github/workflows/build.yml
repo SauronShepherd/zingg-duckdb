@@ -40,6 +40,73 @@ jobs:
         shell: bash
         run: ./mvnw -DskipTests clean package
 
+  native-validation:
+    name: Native tests (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-amd64, os: ubuntu-24.04 }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: macos-x86_64, os: macos-13 }
+          - { target: macos-arm64, os: macos-14 }
+          - { target: windows-x86_64, os: windows-2025 }
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run full Maven tests (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./mvnw -B -ntp -Dduckdb.version=1.5.6.0 -Dsurefire.timeout=300 test
+      - name: Run full Maven tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./mvnw.cmd -B -ntp '-Dduckdb.version=1.5.6.0' '-Dsurefire.timeout=300' test
+      - name: Run Python tests (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: PYTHONPATH=python PYTHONWARNINGS=error python -m unittest discover -s python/tests -v
+      - name: Run Python tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = 'python'
+          $env:PYTHONWARNINGS = 'error'
+          python -m unittest discover -s python/tests -v
+      - name: Fetch pinned SecondString oracle (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/secondstring.jar" \
+            https://raw.githubusercontent.com/zinggAI/zingg/21f54e9b4693d49d6f26b2851853b140951a7502/thirdParty/lib/secondstring.jar
+          test "$(sha256sum "$RUNNER_TEMP/secondstring.jar" | cut -d' ' -f1)" = 5267ae94cb2feff6b75bf112c1d22976b7835e04bad14b369cbd5525f20b520
+      - name: Fetch pinned SecondString oracle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $oracle = Join-Path $env:RUNNER_TEMP 'secondstring.jar'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/zinggAI/zingg/21f54e9b4693d49d6f26b2851853b140951a7502/thirdParty/lib/secondstring.jar' -OutFile $oracle
+          if ((Get-FileHash $oracle -Algorithm SHA256).Hash.ToLowerInvariant() -ne '5267ae94cb2feff6b75bf112c1d22976b7835e04bad14b369cbd5525f20b520') { throw 'SecondString oracle checksum mismatch' }
+      - name: Run exact SecondString differential (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./mvnw -B -ntp -pl engine-duckdb -am -Dsecondstring.oracle=true "-Dsecondstring.jar=$RUNNER_TEMP/secondstring.jar" -Dtest=SecondStringJaccardDifferentialTest -Dsurefire.failIfNoSpecifiedTests=false test
+      - name: Run exact SecondString differential (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./mvnw.cmd -B -ntp -pl engine-duckdb -am '-Dsecondstring.oracle=true' "-Dsecondstring.jar=$env:RUNNER_TEMP\secondstring.jar" '-Dtest=SecondStringJaccardDifferentialTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+
   windows-package:
     name: Assemble Windows distribution
     runs-on: windows-2025
@@ -253,7 +320,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { lane: pinned-1.5.5.1, version: '1.5.5.1', nonBlocking: false }
+          - { lane: pinned-1.5.6.0, version: '1.5.6.0', nonBlocking: false }
           - { lane: published-1.4.5.0, version: '1.4.5.0', nonBlocking: true }
           - { lane: published-1.4.4.0, version: '1.4.4.0', nonBlocking: true }
           # Forward-looking lane: remains informational until DuckDB 2.0 is published.
@@ -320,19 +387,19 @@ jobs:
       - name: Run JDBC lifecycle probe
         shell: bash
         run: |
-          java -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.5.1/duckdb_jdbc-1.5.5.1.jar" \
+          java -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.6.0/duckdb_jdbc-1.5.6.0.jar" \
             io.zingg.duckdb.engine.JdbcLifecycleProbe
       - name: Run benchmark smoke
         shell: bash
         run: |
           java --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-            -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.5.1/duckdb_jdbc-1.5.5.1.jar" \
+            -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.6.0/duckdb_jdbc-1.5.6.0.jar" \
             io.zingg.duckdb.engine.BenchmarkMain --size 1000 --repetitions 3 | tee benchmark-linux.json
           java --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-            -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.5.1/duckdb_jdbc-1.5.5.1.jar" \
+            -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.6.0/duckdb_jdbc-1.5.6.0.jar" \
             io.zingg.duckdb.engine.BenchmarkMain --arrow-only --size 1000 --repetitions 3 | tee benchmark-arrow-linux.json
           java --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-            -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.5.1/duckdb_jdbc-1.5.5.1.jar" \
+            -cp "engine-duckdb/target/classes:engine-api/target/classes:$HOME/.m2/repository/org/duckdb/duckdb_jdbc/1.5.6.0/duckdb_jdbc-1.5.6.0.jar" \
             io.zingg.duckdb.engine.BenchmarkMain --arrow-only --resource-sampling --size 1000 --repetitions 3 | tee benchmark-arrow-resources-linux.json
           python3 - <<'PY'
           import json

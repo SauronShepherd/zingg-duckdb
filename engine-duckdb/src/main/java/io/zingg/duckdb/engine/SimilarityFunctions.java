@@ -3,8 +3,19 @@ package io.zingg.duckdb.engine;
 public final class SimilarityFunctions {
  private SimilarityFunctions(){}
  public static double exact(String a,String b){return a==null||b==null?0d:(a.equals(b)?1d:0d);}
- /** Zingg v0.7 / SecondString token-set Jaccard, with a defined safe blank-value result. */
- public static double jaccard(String a,String b){if(isBlank(a)||isBlank(b))return 1d;var left=tokens(a);var right=tokens(b);var union=new java.util.HashSet<>(left);union.addAll(right);if(union.isEmpty())return 1d;var intersection=new java.util.HashSet<>(left);intersection.retainAll(right);return (double)intersection.size()/union.size();}
+ /** Legacy released profile: blank values intentionally use the historical safe score of 1. */
+ public static double jaccard(String a,String b){if(isBlank(a)||isBlank(b))return 1d;return tokenJaccard(a,b,1d);}
+ /** Exact Zingg v0.7 StringSimilarityDistanceFunction + SecondString Jaccard behavior. */
+ public static double secondStringJaccard(String a,String b){
+  if(a==null||a.isEmpty()||b==null||b.isEmpty()||a.equals(b))return 1d;
+  return tokenJaccard(a,b,0d);
+ }
+ private static double tokenJaccard(String a,String b,double emptyTokenSetScore){
+  var left=tokens(a);var right=tokens(b);var union=new java.util.HashSet<>(left);union.addAll(right);
+  if(union.isEmpty())return emptyTokenSetScore;
+  var intersection=new java.util.HashSet<>(left);intersection.retainAll(right);
+  return (double)intersection.size()/union.size();
+ }
  private static boolean isBlank(String value){return value==null||value.trim().isEmpty();}
  private static java.util.Set<String> tokens(String value){
   var result=new java.util.HashSet<String>();var token=new StringBuilder();int kind=0;

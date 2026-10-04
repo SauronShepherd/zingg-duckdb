@@ -11,9 +11,11 @@ import java.util.function.BiFunction;
 /** Explicit, immutable-by-default registry for two-value compatibility similarities. */
 public final class SimilarityRegistry {
   private final Map<String, BiFunction<String, String, Double>> functions = new LinkedHashMap<>();
-  public SimilarityRegistry() {
+  public SimilarityRegistry() { this(false); }
+  public SimilarityRegistry(boolean exactSecondStringJaccard) {
     functions.put("exact", SimilarityFunctions::exact);
-    functions.put("jaccard", SimilarityFunctions::jaccard);
+    functions.put("jaccard", exactSecondStringJaccard
+        ? SimilarityFunctions::secondStringJaccard : SimilarityFunctions::jaccard);
     functions.put("normalized_levenshtein", SimilarityFunctions::normalizedLevenshtein);
     functions.put("jaro", SimilarityFunctions::jaro);
     functions.put("jaro_winkler", SimilarityFunctions::jaro);

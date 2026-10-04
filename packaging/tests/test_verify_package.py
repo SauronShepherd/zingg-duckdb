@@ -36,13 +36,17 @@ def make_bundle(root: Path) -> Path:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"fixture")
-    (bundle / "config/runtime-manifest.json").write_text(json.dumps({"java": {"major": 21, "bundled": True}}))
+    (bundle / "config/runtime-manifest.json").write_text(json.dumps({
+        "compatibilityProfile": "zingg-0.7.0-duckdb-1.5.6.0",
+        "duckdbJdbc": "1.5.6.0", "java": {"major": 21, "bundled": True}
+    }))
     (bundle / "config/compatibility-profile.json").write_text(json.dumps({
-        "id": "zingg-0.7.0-duckdb-1.5.5.1", "rules": {"similarities": ["exact"]}
+        "id": "zingg-0.7.0-duckdb-1.5.6.0", "duckdbJdbc": "1.5.6.0",
+        "rules": {"similarities": ["exact"]}
     }))
     (bundle / "config/compatibility-capsule.json").write_text(json.dumps({
         "schema": "zingg-duckdb-compatibility-capsule-1",
-        "profile": "zingg-0.7.0-duckdb-1.5.5.1", "notices": ["NOTICE.md"], "patches": []
+        "profile": "zingg-0.7.0-duckdb-1.5.6.0", "notices": ["NOTICE.md"], "patches": []
     }))
     (bundle / "config/release-policy.json").write_text(json.dumps({
         "schema": "zingg-duckdb-release-policy-1",
@@ -61,7 +65,7 @@ def make_bundle(root: Path) -> Path:
     (bundle / "sbom.spdx.json").write_text("{}")
     (bundle / "config/source-provenance.json").write_text(json.dumps({
         "schema": "zingg-duckdb-provenance-1",
-        "compatibilityProfile": "zingg-0.7.0-duckdb-1.5.5.1", "files": source_records,
+        "compatibilityProfile": "zingg-0.7.0-duckdb-1.5.6.0", "files": source_records,
         "workerArtifactSha256": digest
     }))
     return bundle

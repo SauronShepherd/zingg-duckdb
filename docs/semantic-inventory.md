@@ -1,6 +1,6 @@
 # Semantic inventory
 
-Compatibility profile: `zingg-0.7.0-duckdb-1.5.5.1`.
+Compatibility profiles: released `zingg-0.7.0-duckdb-1.5.5.1` (immutable) and active `zingg-0.7.0-duckdb-1.5.6.0`.
 
 This inventory is the implementation-facing contract. New functions or operations must be added here before they are exposed through a public compatibility profile.
 
@@ -41,7 +41,7 @@ Other native model families are separate: `BLOCKING_TREE` currently means a dete
 | Name | Domain | Null/empty behavior | Normalization/quirks |
 |---|---|---|---|
 | `exact` | `[0,1]` | Any null operand scores `0`, including null/null | Case- and punctuation-sensitive exact string equality. |
-| `jaccard` | `[0,1]` | If either value is null/blank, score is `1` | Lowercase with `Locale.ROOT`; non-letter/digit runs delimit tokens; compares token sets, so repeats do not add weight. |
+| `jaccard` | `[0,1]` | Active profile follows Zingg v0.7's wrapper: null/empty or equal strings score `1`; different empty-token inputs score `0` | SecondString `SimpleTokenizer` semantics: default-locale lowercase, whitespace/letter/digit token runs, punctuation ignored; compares token sets, so repeats do not add weight. The released 1.5.5.1 profile retains its historical blank-safe score of `1`. |
 | `normalized_levenshtein` | `[0,1]` | Any null operand scores `0`; two empty strings score `1` | `1 - editDistance / max(UTF-16 lengths)`; exact string, case and punctuation are retained. |
 | `jaro` | `[0,1]` | Any null operand scores `0`; equal strings (including empty) score `1` | Character-based Jaro, case-sensitive; no Winkler prefix boost. |
 | `jaro_winkler` | `[0,1]` | Same as `jaro` | Released v0.7 quirk: delegates to plain Jaro; it is not a Winkler-scored implementation. |

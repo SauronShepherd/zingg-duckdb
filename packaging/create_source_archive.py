@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 SCHEMA = "zingg-duckdb-source-archive-1"
-PROFILE = "zingg-0.7.0-duckdb-1.5.5.1"
+PROFILE = "zingg-0.7.0-duckdb-1.5.6.0"
 ARCHIVE_ROOT = "zingg-duckdb"
 MAX_FILES = 200_000
 MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024

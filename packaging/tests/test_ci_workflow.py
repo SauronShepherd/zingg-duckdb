@@ -11,6 +11,19 @@ SECURITY_WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/sec
 
 
 class BuildWorkflowTest(unittest.TestCase):
+    def test_native_validation_matrix_covers_promoted_profile_and_secondstring_oracle(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        start = source.index("  native-validation:")
+        end = source.index("\n  windows-package:", start)
+        job = source[start:end]
+        for target in ("linux-amd64", "linux-arm64", "macos-x86_64", "macos-arm64", "windows-x86_64"):
+            self.assertIn(f"target: {target}", job)
+        self.assertEqual(0, job.count("1.5.5.1"))
+        self.assertGreaterEqual(job.count("1.5.6.0"), 2)
+        self.assertIn("21f54e9b4693d49d6f26b2851853b140951a7502", job)
+        self.assertIn("5267ae94cb2feff6b75bf112c1d22976b7835e04bad14b369cbd5525f20b520", job)
+        self.assertIn("SecondStringJaccardDifferentialTest", job)
+
     def test_benchmark_ci_separates_clean_timings_from_resource_sampling(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
         start = source.index("      - name: Run benchmark smoke")

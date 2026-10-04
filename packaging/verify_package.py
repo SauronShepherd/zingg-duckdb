@@ -124,7 +124,9 @@ def verify_structure(bundle: Path, require_jre: bool, windows: bool | None = Non
     provenance = _json(root / "config/source-provenance.json")
     runtime = _json(root / "config/runtime-manifest.json")
 
-    if not isinstance(profile, dict) or profile.get("id") != "zingg-0.7.0-duckdb-1.5.5.1":
+    if (not isinstance(profile, dict)
+            or profile.get("id") != "zingg-0.7.0-duckdb-1.5.6.0"
+            or profile.get("duckdbJdbc") != "1.5.6.0"):
         raise ValueError("unexpected compatibility profile")
     rules = profile.get("rules")
     if not isinstance(rules, dict) or not rules.get("similarities"):
@@ -188,6 +190,10 @@ def verify_structure(bundle: Path, require_jre: bool, windows: bool | None = Non
             raise ValueError(f"source archive does not exist: {source_archive}")
         verify_source_archive_provenance(provenance, source_archive)
     java = runtime.get("java") if isinstance(runtime, dict) else None
+    if (not isinstance(runtime, dict)
+            or runtime.get("compatibilityProfile") != profile["id"]
+            or runtime.get("duckdbJdbc") != "1.5.6.0"):
+        raise ValueError("runtime manifest does not match active compatibility profile")
     if not isinstance(java, dict) or java.get("major") != 21 or java.get("bundled") is not True:
         raise ValueError("runtime manifest must declare bundled Java 21")
     if require_jre:

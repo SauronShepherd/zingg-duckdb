@@ -1,7 +1,7 @@
 {
   "runtime": {
     "java": "21",
-    "duckdbJdbc": "1.5.5.1",
+    "duckdbJdbc": "1.5.6.0",
     "arrowJava": "19.0.0",
     "zinggCompatibility": "0.7.0",
     "sparkReference": "3.5.5",

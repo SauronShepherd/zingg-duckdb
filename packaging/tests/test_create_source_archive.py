@@ -61,7 +61,7 @@ class CreateSourceArchiveTest(unittest.TestCase):
                 self.assertFalse(any("generated.bin" in name for name in names))
                 document = json.loads(archive.read("zingg-duckdb/SOURCE-MANIFEST.json"))
                 self.assertEqual(CREATE.SCHEMA, document["schema"])
-                self.assertEqual(CREATE.PROFILE, document["compatibilityProfile"])
+                self.assertEqual("zingg-0.7.0-duckdb-1.5.6.0", document["compatibilityProfile"])
                 readme = archive.getinfo("zingg-duckdb/README.md")
                 self.assertEqual((readme.external_attr >> 16) & 0o777, 0o644)
                 launcher = archive.getinfo("zingg-duckdb/mvnw")

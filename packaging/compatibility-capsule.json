@@ -1,6 +1,6 @@
 {
   "schema": "zingg-duckdb-compatibility-capsule-1",
-  "profile": "zingg-0.7.0-duckdb-1.5.5.1",
+  "profile": "zingg-0.7.0-duckdb-1.5.6.0",
   "upstream": {
     "product": "zingg",
     "version": "0.7.0",

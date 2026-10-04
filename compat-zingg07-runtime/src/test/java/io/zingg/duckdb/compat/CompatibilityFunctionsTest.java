@@ -10,6 +10,7 @@ import java.util.List;
 import java.nio.charset.StandardCharsets;
 import io.zingg.duckdb.api.CompatibilityClock;
 import io.zingg.duckdb.api.DuckException;
+import io.zingg.duckdb.api.RuntimeConfig;
 import io.zingg.duckdb.model.ModelFormat;
 import io.zingg.duckdb.model.ModelManifest;
 import io.zingg.duckdb.model.ModelReader;
@@ -138,5 +139,27 @@ class CompatibilityFunctionsTest {
     var profile = new ProfileRegistry().require("zingg-0.7.0-duckdb-1.5.5.1");
     assertEquals("true", profile.rules().get("jaroWinklerDelegatesToJaro"));
     assertEquals("strict-released-quirks", profile.rules().get("profileSemantics"));
+  }
+
+  @Test
+  void releasedProfileStillUsesHistoricalBlankSafeJaccard() {
+    try (var runtime = new CompatibilityRuntime(
+        new RuntimeConfig("jdbc:duckdb:", Runtime.getRuntime().availableProcessors(), 0, null, 1),
+        CompatibilityClock.system(), ProfileRegistry.RELEASED_PROFILE_ID)) {
+      assertEquals(1.0, runtime.similarities().apply("jaccard", "   ", "value"));
+      assertEquals(1.0, runtime.similarities().apply("jaccard", ".,;", "!?"));
+    }
+  }
+
+  @Test
+  void promotedDuckdb156ProfileUsesExactSecondStringJaccard() {
+    try (var runtime = new CompatibilityRuntime("jdbc:duckdb:", CompatibilityClock.system())) {
+      assertEquals(ProfileRegistry.DEFAULT_PROFILE_ID, runtime.profile().id());
+      assertEquals("1.5.6.0", runtime.profile().duckdbVersion());
+      assertEquals("secondstring-exact", runtime.profile().rules().get("jaccardSemantics"));
+      assertEquals(0.0, runtime.similarities().apply("jaccard", "   ", "value"));
+      assertEquals(0.0, runtime.similarities().apply("jaccard", ".,;", "!?"));
+      assertEquals(1.0, runtime.similarities().apply("jaccard", ".,;", ".,;"));
+    }
   }
 }

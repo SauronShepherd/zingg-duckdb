@@ -12,6 +12,9 @@ import java.util.Locale;
 
 /** Reproducible diagnostic for native classifier training across row counts and feature widths. */
 public final class ClassifierTrainingBenchmarkMain {
+  private static final String ACTIVE_DUCKDB_VERSION =
+      new ProfileRegistry().require(ProfileRegistry.DEFAULT_PROFILE_ID).duckdbVersion();
+
   private ClassifierTrainingBenchmarkMain() {}
 
   public static void main(String[] args) throws Exception {
@@ -54,7 +57,7 @@ public final class ClassifierTrainingBenchmarkMain {
     String inputIdentity = "rows=" + rows + ";width=" + width + ";generator=deterministic-v1";
     String configIdentity = "width=" + width + ";iterations=" + iterations + ";learningRate=0.05;l2=0.0001;threads="
         + Runtime.getRuntime().availableProcessors() + ";jdk=" + System.getProperty("java.runtime.version")
-        + ";duckdb=1.5.5.1";
+        + ";duckdb=" + ACTIVE_DUCKDB_VERSION;
     Path root = Files.createTempDirectory("zingg-classifier-training-benchmark-");
     try {
       for (int run = -1; run < repetitions; run++) {
@@ -171,7 +174,8 @@ public final class ClassifierTrainingBenchmarkMain {
         .append(",\"containerImage\":").append(q(System.getenv().getOrDefault("ZINGG_CONTAINER_IMAGE", "unrecorded")))
         .append(",\"availableProcessors\":").append(Runtime.getRuntime().availableProcessors())
         .append(",\"maxHeapBytes\":").append(Runtime.getRuntime().maxMemory())
-        .append(",\"duckdbVersion\":\"1.5.5.1\",\"warmupRuns\":1,\"repetitions\":").append(repetitions)
+        .append(",\"duckdbVersion\":\"").append(ACTIVE_DUCKDB_VERSION)
+        .append("\",\"warmupRuns\":1,\"repetitions\":").append(repetitions)
         .append(",\"iterations\":").append(iterations).append(",\"cases\":[");
     for (int i = 0; i < cases.size(); i++) {
       if (i > 0) out.append(',');

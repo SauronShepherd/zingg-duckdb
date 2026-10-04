@@ -10,7 +10,8 @@ This repository is treated as a standalone DuckDB backend and compatibility caps
 The pinned implementation baseline is:
 
 - Zingg compatibility target: `v0.7.0`
-- DuckDB JDBC: `1.5.5.1`
+- Active DuckDB JDBC profile: `1.5.6.0`
+- Retained released DuckDB JDBC profile: `1.5.5.1` (immutable)
 - Java: `21`
 - Python control-plane baseline: `3.10+`
 - Default runtime mode: offline, with extension auto-installation disabled

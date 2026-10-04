@@ -45,7 +45,7 @@ def generate(root: Path, output: Path) -> None:
         raise ValueError("worker artifact is missing from source provenance")
     document = {
         "schema": "zingg-duckdb-provenance-1",
-        "compatibilityProfile": "zingg-0.7.0-duckdb-1.5.5.1",
+        "compatibilityProfile": "zingg-0.7.0-duckdb-1.5.6.0",
         "workerArtifactSha256": worker_hash,
         "files": records,
     }

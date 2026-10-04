@@ -3,6 +3,7 @@ import io.zingg.duckdb.api.RuntimeConfig;
 import io.zingg.duckdb.compat.CompatibilityRuntime;
 import io.zingg.duckdb.compat.InMemoryLabelDecisionProvider;
 import io.zingg.duckdb.compat.PersistentLabelDecisionProvider;
+import io.zingg.duckdb.compat.ProfileRegistry;
 import io.zingg.duckdb.engine.ResourceBudget;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
@@ -41,7 +42,7 @@ public final class Main {
     }}
     if(maxModel<0||maxTemp<0||maxInput<0||maxOutput<0||maxCollect<0||maxSpill<0)throw new IllegalArgumentException("resource limits cannot be negative");
     long effectiveTemp=maxTemp>0?maxTemp:maxSpill;
-    try(var runtime=new CompatibilityRuntime(new RuntimeConfig(url,threads,memory,tempDirectory,jobs,effectiveTemp,offline,extensions),null,"zingg-0.7.0-duckdb-1.5.5.1",new ResourceBudget(memory,maxRows,maxInput,maxOutput,maxCollect,maxSpill),
+    try(var runtime=new CompatibilityRuntime(new RuntimeConfig(url,threads,memory,tempDirectory,jobs,effectiveTemp,offline,extensions),null,ProfileRegistry.DEFAULT_PROFILE_ID,new ResourceBudget(memory,maxRows,maxInput,maxOutput,maxCollect,maxSpill),
             labelsRoot==null?new InMemoryLabelDecisionProvider():new PersistentLabelDecisionProvider(labelsRoot));
         var server=new ConfiguredWorkerServer(runtime,new io.zingg.duckdb.api.PathPolicy(inputRoot,outputRoot),maxModel,maxOutput,maxRows,maxCollect,maxSpill,unsafeDebugSql))
       {server.serve(new java.io.InputStreamReader(System.in),new java.io.OutputStreamWriter(System.out));}

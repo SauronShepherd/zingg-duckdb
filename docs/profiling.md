@@ -2,7 +2,7 @@
 
 Profiling evidence is collected without changing the model or output contract. A capture consists of:
 
-- `profile`: the compatibility profile, currently `zingg-0.7.0-duckdb-1.5.5.1`.
+- `profile`: the active compatibility profile, currently `zingg-0.7.0-duckdb-1.5.6.0`; the released `1.5.5.1` profile remains available for immutable replay.
 - `build`: package version, worker artifact SHA-256, Java version, and DuckDB JDBC version.
 - `request`: operation name, phase, input manifest hashes, row limits, and relevant configuration.
 - `runtime`: the response from the worker `status` operation, including effective DuckDB limits and JVM heap counters.
