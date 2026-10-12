@@ -12,8 +12,15 @@ $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) { throw "Python 3 is required to prepare Native Image metadata" }
 $nativeImageCommand = Get-Command $NativeImage -ErrorAction SilentlyContinue
 if (-not $nativeImageCommand) {
-  throw "GraalVM Native Image prerequisite is missing: '$NativeImage' was not found on PATH; install GraalVM for Java 21 or pass -NativeImage with an explicit executable path"
+  throw "GraalVM Native Image prerequisite is missing: '$NativeImage' was not found on PATH; install GraalVM for JDK 22+ or pass -NativeImage with an explicit executable path"
 }
+$javaCommand = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin\java.exe' } else { 'java' }
+$javaVersionOutput = & $javaCommand -version 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0 -or $javaVersionOutput -notmatch 'version "(?<major>\d+)') {
+  throw "JDK 22+ is required for Native Image; unable to determine version from '$javaCommand'"
+}
+$javaMajor = [int]$Matches.major
+if ($javaMajor -lt 22) { throw "JDK 22+ is required for Native Image; detected JDK $javaMajor from '$javaCommand'" }
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
 $target = Join-Path (Resolve-Path -LiteralPath $Output).Path $BinaryName
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("zingg-native-image-config-" + [guid]::NewGuid().ToString("N"))

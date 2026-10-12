@@ -16,7 +16,9 @@ public final class DuckJob implements JobHandle {
   private final Runnable release;
   private final ResourceBudget budget;
   private final DuckCancellation cancellation;
+  private volatile java.nio.file.Path cachedTempDirectory;
   private final Set<String> materializedTables = Collections.synchronizedSet(new LinkedHashSet<>());
+  private final Object materializationLifecycle = new Object();
   private final AtomicBoolean closed = new AtomicBoolean();
 
   public DuckJob(DuckDBConnection connection, JobId id) {
@@ -54,12 +56,16 @@ public final class DuckJob implements JobHandle {
 
   public Statement createStatement() throws SQLException {
     Statement statement = connection.createStatement();
-    return cancellation == null ? statement : cancellation.track(statement);
+    Statement tracked = cancellation == null ? statement : cancellation.track(statement);
+    return budget.maxSpillBytes() <= 0 ? tracked
+        : SpillByteGuard.track(tracked, tempDirectory(), budget.maxSpillBytes());
   }
 
   public PreparedStatement prepareStatement(String sql) throws SQLException {
     PreparedStatement statement = connection.prepareStatement(sql);
-    return cancellation == null ? statement : (PreparedStatement) cancellation.track(statement);
+    PreparedStatement tracked = cancellation == null ? statement : (PreparedStatement) cancellation.track(statement);
+    return budget.maxSpillBytes() <= 0 ? tracked
+        : (PreparedStatement) SpillByteGuard.track(tracked, tempDirectory(), budget.maxSpillBytes());
   }
 
   public void checkCancelled() {
@@ -69,26 +75,35 @@ public final class DuckJob implements JobHandle {
   ResourceBudget budget() { return budget; }
 
   java.nio.file.Path tempDirectory() {
+    java.nio.file.Path existing = cachedTempDirectory;
+    if (existing != null) return existing;
     try (var statement = connection.createStatement();
          var result = statement.executeQuery("SELECT current_setting('temp_directory')")) {
       if (!result.next()) throw new SQLException("DuckDB did not return temp_directory");
       String configured = result.getString(1);
       String path = configured == null || configured.isBlank()
           ? System.getProperty("java.io.tmpdir") : configured;
-      return java.nio.file.Path.of(path).toAbsolutePath().normalize();
+      java.nio.file.Path resolved = java.nio.file.Path.of(path).toAbsolutePath().normalize();
+      cachedTempDirectory = resolved;
+      return resolved;
     } catch (SQLException | java.nio.file.InvalidPathException e) {
       throw new DuckException("cannot resolve DuckDB temp_directory for input snapshots", e);
     }
   }
 
-  void registerMaterialized(String name) { materializedTables.add(name); }
+  void registerMaterialized(String name) {
+    synchronized (materializationLifecycle) {
+      if (closed.get()) throw new DuckException("job is already closed");
+      materializedTables.add(name);
+    }
+  }
 
   void dropMaterialized(String name) throws SQLException {
     // Cleanup must remain available after cancellation has disabled normal SQL.
     try (var statement = connection.createStatement()) {
       statement.execute("DROP TABLE IF EXISTS " + DuckExpr.quote(schemaName) + "." + DuckExpr.quote(name));
     }
-    materializedTables.remove(name);
+    synchronized (materializedTables) { materializedTables.remove(name); }
   }
 
   int materializedCount() { return materializedTables.size(); }
@@ -107,7 +122,11 @@ public final class DuckJob implements JobHandle {
     try (var statement = createStatement()) {
       statement.execute("CREATE TABLE " + qualified + " (" + definitions + ")");
       registerMaterialized(table);
-    } catch (SQLException e) {
+    } catch (SQLException | RuntimeException e) {
+      try (var cleanup = connection.createStatement()) {
+        cleanup.execute("DROP TABLE IF EXISTS " + qualified);
+      } catch (SQLException cleanupFailure) { e.addSuppressed(cleanupFailure); }
+      if (e instanceof DuckException duck) throw duck;
       throw new DuckException("cannot create job-local frame", e);
     }
     String placeholders = String.join(",", Collections.nCopies(columns.size(), "?"));
@@ -147,7 +166,11 @@ public final class DuckJob implements JobHandle {
     if (!closed.compareAndSet(false, true)) return;
     DuckException failure = null;
     try {
-      for (String name : materializedTables)
+      java.util.List<String> tables;
+      synchronized (materializationLifecycle) {
+        synchronized (materializedTables) { tables = new java.util.ArrayList<>(materializedTables); }
+      }
+      for (String name : tables)
         try (var statement = connection.createStatement()) {
           statement.execute("DROP TABLE IF EXISTS " + DuckExpr.quote(schemaName) + "." + DuckExpr.quote(name));
         }

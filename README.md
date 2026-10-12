@@ -119,7 +119,7 @@ sequenceDiagram
 
 ## Configuration and safety defaults
 
-Supported worker options include `--memory-bytes`, `--temp-directory`, `--max-temp-bytes`, `--max-spill-bytes`, `--max-collect-bytes`, `--max-output-bytes`, `--max-rows`, `--max-model-bytes`, `--max-jobs`, `--offline`, and `--allow-extension`. The default connector policy is offline and extensions are disabled. `--max-temp-bytes` configures DuckDB's spill setting but is not an OS disk quota; Docker operators needing a hard container bound should mount a size-limited writable filesystem/tmpfs at `--temp-directory`. Arbitrary diagnostic `count`/`explain` SQL is disabled by default; use `--unsafe-debug-sql` only in a controlled diagnostic process.
+Supported worker options include `--memory-bytes`, `--temp-directory`, `--max-temp-bytes`, `--max-spill-bytes`, `--max-collect-bytes`, `--max-output-bytes`, `--max-rows`, `--max-model-bytes`, `--max-jobs`, `--offline`, and `--allow-extension`. The default connector policy is offline and extensions are disabled. `--max-spill-bytes` is an application-level shared growth guard for active jobs using the same temp directory; `--max-temp-bytes` configures DuckDB's spill setting but is not an OS disk quota. When both are set, both protections apply; cross-process enforcement still depends on DuckDB's setting or an OS/container quota. Docker operators needing a hard container bound should mount a size-limited writable filesystem/tmpfs at `--temp-directory`. Arbitrary diagnostic `count`/`explain` SQL is disabled by default; use `--unsafe-debug-sql` only in a controlled diagnostic process.
 
 ## Validation and performance
 

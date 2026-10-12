@@ -108,7 +108,7 @@ public final class ZinggPipeline {
       try {
       try (FileChannel channel=FileChannel.open(lockPath, StandardOpenOption.CREATE,
           StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
-           FileLock ignored=channel.lock()) {
+           FileLock ignored=acquireFileLock(channel)) {
         // Only cooperative writers use this lock. It prevents recovery from
         // deleting another live writer's staging file and serializes same-target commits.
         cleanupOrphanOutputs(parent,"."+name+".partial-");
@@ -136,8 +136,22 @@ public final class ZinggPipeline {
       local=OUTPUT_LOCKS.computeIfAbsent(identity,ignored->new LocalOutputLock());
       local.users++;
     }
-    local.lock.lock();
-    return local;
+    try {
+      while (true) {
+        checkCancellation();
+        try {
+          if (local.lock.tryLock(25, java.util.concurrent.TimeUnit.MILLISECONDS)) return local;
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw new DuckException("interrupted waiting for output lock", interrupted);
+        }
+      }
+    } catch (RuntimeException | Error failure) {
+      synchronized(OUTPUT_LOCKS_MONITOR) {
+        if (--local.users == 0) OUTPUT_LOCKS.remove(identity, local);
+      }
+      throw failure;
+    }
   }
   private static void releaseOutputLock(String identity,LocalOutputLock local) {
     local.lock.unlock();
@@ -156,6 +170,25 @@ public final class ZinggPipeline {
   private static void checkCancellation() {
     DuckCancellation cancellation = DuckCancellation.current();
     if (cancellation != null) cancellation.throwIfCancelled();
+  }
+  private static FileLock acquireFileLock(FileChannel channel) throws IOException {
+    while (true) {
+      checkCancellation();
+      try {
+        FileLock lock=channel.tryLock();
+        if (lock != null) return lock;
+      } catch (java.nio.channels.OverlappingFileLockException busyInJvm) {
+        // A cooperating same-JVM writer is serialized by OUTPUT_LOCKS. A
+        // provider can still report overlap while another lexical path is
+        // resolving; poll so cancellation remains bounded.
+      }
+      try {
+        Thread.sleep(25L);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new DuckException("interrupted waiting for output lock", interrupted);
+      }
+    }
   }
   static void moveAtomically(Path source, Path target, AtomicMover mover) throws IOException {
     java.util.Objects.requireNonNull(source, "source is required");

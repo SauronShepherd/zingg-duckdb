@@ -18,6 +18,17 @@ public final class ModelReader {
   private ModelReader(){}
   public static LoadedModel load(Path root,long maxBytes) throws IOException {
     Path dir=root.toAbsolutePath().normalize();
+    Path parent=dir.getParent();
+    if(parent==null||!Files.isDirectory(parent,LinkOption.NOFOLLOW_LINKS))
+      throw new DuckException("model artifact directory is required: "+dir);
+    // The writer performs two directory renames during replacement. Holding a
+    // shared publication lock for the complete read prevents a reader from
+    // observing the intentional gap between those renames or a torn model.
+    try(var ignored=ModelPublicationLock.read(dir)) {
+      return loadUnlocked(dir,maxBytes);
+    }
+  }
+  private static LoadedModel loadUnlocked(Path dir,long maxBytes) throws IOException {
     if(Files.isSymbolicLink(dir)||!Files.isDirectory(dir,LinkOption.NOFOLLOW_LINKS))throw new DuckException("model artifact directory is required: "+dir);
     try(var paths=Files.walk(dir)){for(var it=paths.iterator();it.hasNext();)if(Files.isSymbolicLink(it.next()))throw new DuckException("symbolic links are not allowed in model artifacts");}catch(UncheckedIOException e){throw e.getCause();}
     if(maxBytes>0){try(var paths=Files.walk(dir)){long total=0;for(var it=paths.filter(Files::isRegularFile).iterator();it.hasNext();){long size=Files.size(it.next());if(size>maxBytes-total)throw new DuckException("model artifact exceeds configured size limit");total+=size;}}catch(UncheckedIOException e){throw e.getCause();}}

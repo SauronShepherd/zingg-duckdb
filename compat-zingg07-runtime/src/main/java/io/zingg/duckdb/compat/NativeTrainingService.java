@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.TreeMap;
 
 /** Produces a neutral, Spark-free native TRAIN artifact. */
@@ -29,7 +30,12 @@ public final class NativeTrainingService {
     cancellation.throwIfCancelled();
     long rows = prepared.count(cancellation);
     // TreeMap makes the serialized tree independent of input partition/order.
-    var frequencies = new TreeMap<String,Long>();
+    // A plain string sentinel makes a real blocking value such as
+    // "__NULL__" indistinguishable from SQL NULL. Keep nullness in the key
+    // type so histogram counts and serialized models remain injective.
+    var frequencies = new TreeMap<BlockingKey,Long>(Comparator
+        .comparing(BlockingKey::isNull).thenComparing(BlockingKey::value,
+            Comparator.nullsFirst(String::compareTo)));
     int blockingIndex = prepared.columns().indexOf(config.blockingColumn());
     if (blockingIndex < 0) throw new DuckException("training blocking column is not present: " + config.blockingColumn());
     var trainingRows = prepared.collect(cancellation);
@@ -37,12 +43,15 @@ public final class NativeTrainingService {
       if ((rowIndex & 0x3ff) == 0) cancellation.throwIfCancelled();
       var row = trainingRows.get(rowIndex);
       Object value = row.values().get(blockingIndex);
-      String key = value == null ? "__NULL__" : String.valueOf(value);
+      BlockingKey key = value == null ? new BlockingKey(true, null)
+          : new BlockingKey(false, String.valueOf(value));
       frequencies.merge(key, 1L, Long::sum);
     }
     long maxBucketSize = frequencies.values().stream().mapToLong(Long::longValue).max().orElse(0L);
     String frequencyJson = frequencies.entrySet().stream()
-        .map(e -> "{\"key\":\"" + esc(e.getKey()) + "\",\"count\":" + e.getValue() + "}")
+        .map(e -> "{\"isNull\":" + e.getKey().isNull() + ",\"key\":"
+            + (e.getKey().isNull() ? "null" : "\"" + esc(e.getKey().value()) + "\"")
+            + ",\"count\":" + e.getValue() + "}")
         .collect(java.util.stream.Collectors.joining(","));
     String payload = "{\"kind\":\"duckdb-blocking-histogram\",\"profile\":\"" + esc(config.profile())
         + "\",\"blockingExpression\":\"" + esc(config.blockingExpression())
@@ -86,4 +95,5 @@ public final class NativeTrainingService {
     return out.toString();
   }
   public record Result(Path artifactDirectory, long sampledRows, java.util.List<String> columns) { public Result { columns = java.util.List.copyOf(columns); } }
+  private record BlockingKey(boolean isNull, String value) {}
 }

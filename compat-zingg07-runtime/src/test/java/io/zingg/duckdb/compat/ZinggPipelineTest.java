@@ -277,6 +277,53 @@ class ZinggPipelineTest {
   }
 
   @Test
+  void cancellationInterruptsAWaitForTheOutputLock(@TempDir Path temp) throws Exception {
+    Path input=temp.resolve("cancel-lock-records.csv");
+    Path output=temp.resolve("cancel-lock-matches.csv");
+    Files.writeString(input,"id,block\n1,a\n2,a\n");
+    Path firstDb=Files.createDirectory(temp.resolve("cancel-lock-db-one"));
+    Path secondDb=Files.createDirectory(temp.resolve("cancel-lock-db-two"));
+    var firstEntered=new java.util.concurrent.CountDownLatch(1);
+    var releaseFirst=new java.util.concurrent.CountDownLatch(1);
+    var secondWaiting=new java.util.concurrent.CountDownLatch(1);
+    var cancellation=new DuckCancellation();
+    try(var firstRuntime=runtime(firstDb); var secondRuntime=runtime(secondDb);
+        var executor=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+      var firstPipeline=new ZinggPipeline(firstRuntime,(source,target)->{
+        firstEntered.countDown();
+        try {
+          if(!releaseFirst.await(30,java.util.concurrent.TimeUnit.SECONDS))
+            throw new IOException("timed out waiting to release first output publisher");
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw new IOException("interrupted waiting to release first output publisher", interrupted);
+        }
+        Files.move(source,target,java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+      });
+      var secondPipeline=new ZinggPipeline(secondRuntime,
+          (source,target)->Files.move(source,target,java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+              java.nio.file.StandardCopyOption.ATOMIC_MOVE), secondWaiting::countDown);
+      var first=executor.submit(()->firstPipeline.execute(new PipelineConfig(ZinggJob.Phase.MATCH,
+          java.util.List.of(input),output,"TRUE",null,new Matcher.MatchConfig("id","block","1.0",0.5))));
+      assertTrue(firstEntered.await(60,java.util.concurrent.TimeUnit.SECONDS));
+      var second=executor.submit(()->{
+        try(var ignored=DuckCancellation.install(cancellation)) {
+          return assertThrows(DuckException.class,()->secondPipeline.execute(new PipelineConfig(
+              ZinggJob.Phase.MATCH,java.util.List.of(input),output,"TRUE",null,
+              new Matcher.MatchConfig("id","block","1.0",0.5))));
+        }
+      });
+      assertTrue(secondWaiting.await(60,java.util.concurrent.TimeUnit.SECONDS));
+      cancellation.cancel();
+      DuckException failure=second.get(10,java.util.concurrent.TimeUnit.SECONDS);
+      assertTrue(failure.getMessage().contains("operation cancelled"),failure.toString());
+      releaseFirst.countDown();
+      assertEquals(1,first.get(60,java.util.concurrent.TimeUnit.SECONDS).outputRows());
+    } finally { releaseFirst.countDown(); }
+  }
+
+  @Test
   void sameJvmAllowsParallelPublicationToDistinctOutputs(@TempDir Path temp) throws Exception {
     Path input=temp.resolve("parallel-records.csv");
     Path firstOutputDirectory=Files.createDirectory(temp.resolve("parallel-one"));
@@ -650,6 +697,24 @@ class ZinggPipelineTest {
       assertTrue(payload.contains("\"distinctBlockingKeys\":1"), payload);
       assertTrue(payload.contains("\"maxBucketSize\":3"), payload);
       assertTrue(payload.contains("\"key\":\"same-key\""), payload);
+    }
+  }
+
+  @Test
+  void nativeTrainingKeepsNullAndLiteralSentinelBlockingKeysDistinct(@TempDir Path temp)
+      throws Exception {
+    Path artifact = temp.resolve("null-key-training-artifact");
+    try (var runtime = runtime(temp); var job = new ZinggJob(runtime)) {
+      var input = job.sql("SELECT * FROM (VALUES "
+          + "(1, 1, CAST(NULL AS VARCHAR)), (2, 2, '__NULL__')) AS t(id, z_zid, block_key)");
+      var result = new NativeTrainingService().train(input,
+          NativeTrainingConfig.defaults(artifact, "\"block_key\"", "block_key"));
+      assertEquals(2, result.sampledRows());
+      String payload = new String(ModelReader.load(artifact, 1024 * 1024).payload(),
+          java.nio.charset.StandardCharsets.UTF_8);
+      assertTrue(payload.contains("\"distinctBlockingKeys\":2"), payload);
+      assertTrue(payload.contains("\"isNull\":true,\"key\":null"), payload);
+      assertTrue(payload.contains("\"isNull\":false,\"key\":\"__NULL__\""), payload);
     }
   }
 

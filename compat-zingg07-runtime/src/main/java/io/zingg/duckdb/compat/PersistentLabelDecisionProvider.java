@@ -34,6 +34,7 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
   private static final int JOURNAL_MAGIC_V1 = 0x5a4c4a31; // ZLJ1, append-only applied requests
   private static final int MAX_BYTES = 64 * 1024 * 1024;
   private static final int MAX_ENTRIES = 100_000;
+  private static final long JOURNAL_COMPACTION_THRESHOLD = 1L * 1024 * 1024;
   private static final ReentrantLock JVM_LOCK = new ReentrantLock();
   private final Path directory;
   private final Path snapshot;
@@ -204,6 +205,10 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
         // durable deltas instead of rewriting the cumulative snapshot.
         if (!Files.exists(snapshot, LinkOption.NOFOLLOW_LINKS)) writeSnapshot(current);
         appendAppliedRequest(request);
+        var compactedApplied = new ArrayList<>(current.applied());
+        compactedApplied.add(request);
+        compactAppliedJournalIfNeeded(new Snapshot(List.copyOf(compactedApplied), current.pending(),
+             current.deliveries(), current.enqueues()));
       }
       delegate = staged;
       return result;
@@ -283,7 +288,8 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
     while (offset + 8 <= bytes.length) {
       int magic = java.nio.ByteBuffer.wrap(bytes, offset, 4).getInt();
       int length = java.nio.ByteBuffer.wrap(bytes, offset + 4, 4).getInt();
-      if (magic != JOURNAL_MAGIC_V1 || length < 0 || length > MAX_BYTES - 44) break;
+      if (magic != JOURNAL_MAGIC_V1 || length < 0 || length > MAX_BYTES - 44)
+        throw new DuckException("label journal header is corrupt at byte " + offset);
       long end = (long) offset + 8L + length + 32L;
       if (end > bytes.length) break; // an uncommitted final append
       byte[] payload = java.util.Arrays.copyOfRange(bytes, offset + 8, offset + 8 + length);
@@ -304,7 +310,8 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
     while (offset + 8 <= bytes.length) {
       int magic = java.nio.ByteBuffer.wrap(bytes, offset, 4).getInt();
       int length = java.nio.ByteBuffer.wrap(bytes, offset + 4, 4).getInt();
-      if (magic != JOURNAL_MAGIC_V1 || length < 0 || length > MAX_BYTES - 44) break;
+      if (magic != JOURNAL_MAGIC_V1 || length < 0 || length > MAX_BYTES - 44)
+        throw new DuckException("label journal header is corrupt at byte " + offset);
       long end = (long) offset + 8L + length + 32L;
       if (end > bytes.length) break;
       byte[] payload = java.util.Arrays.copyOfRange(bytes, offset + 8, offset + 8 + length);
@@ -314,6 +321,12 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
       offset = (int) end;
     }
     return offset;
+  }
+
+  private void compactAppliedJournalIfNeeded(Snapshot state) throws IOException {
+    if (!Files.exists(appliedJournal, LinkOption.NOFOLLOW_LINKS)
+        || Files.size(appliedJournal) < JOURNAL_COMPACTION_THRESHOLD) return;
+    writeSnapshot(state);
   }
 
   private FileChannel openAppliedJournalChannel() throws IOException {
@@ -529,6 +542,7 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
       writeObserver.after(SnapshotWriteStage.AFTER_TEMP_FORCE);
       replaceAtomically(temporary, snapshot);
       writeObserver.after(SnapshotWriteStage.AFTER_ATOMIC_MOVE);
+      forceDirectoryEntryBeforeJournalTruncate();
       clearAppliedJournal();
     } catch (AtomicMoveNotSupportedException e) {
       throw new DuckException("atomic label snapshot replacement is unavailable", e);
@@ -558,6 +572,26 @@ public final class PersistentLabelDecisionProvider implements LabelDecisionProvi
       channel.truncate(0);
       channel.force(true);
     }
+  }
+
+  /**
+   * Persist the directory entry before deleting the only durable journal copy.
+   * Windows providers generally cannot force a directory handle; the atomic
+   * snapshot remains the recovery source there, while POSIX providers receive
+   * the required rename durability barrier.
+   */
+  private void forceDirectoryEntryBeforeJournalTruncate() throws IOException {
+    try (var channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+      channel.force(true);
+    } catch (UnsupportedOperationException unsupported) {
+      if (!isWindows()) throw unsupported;
+    } catch (IOException failure) {
+      if (!isWindows()) throw failure;
+    }
+  }
+
+  private static boolean isWindows() {
+    return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
   }
 
   /** Windows scanners can transiently deny replacement while observing the completed temp file. */

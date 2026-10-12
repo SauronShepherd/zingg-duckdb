@@ -27,10 +27,14 @@ class WorkerClient:
     MAX_LINE_CHARS = 8 * 1024 * 1024
     OPERATION = re.compile(r"^[A-Za-z0-9_.-]+$")
 
-    def __init__(self, command: list[str] | None = None, database: str = ":memory:", *, input_root: str | None = None, output_root: str | None = None, labels_root: str | None = None, temp_directory: str | None = None, threads: int | None = None, memory_bytes: int | None = None, max_temp_bytes: int | None = None, max_jobs: int | None = None, max_rows: int | None = None, max_input_bytes: int | None = None, max_spill_bytes: int | None = None, max_collect_bytes: int | None = None, max_model_bytes: int | None = None, max_output_bytes: int | None = None, offline: bool = True, allowed_extensions: list[str] | None = None, unsafe_debug_sql: bool = False, request_timeout: float | None = 300.0):
+    def __init__(self, command: list[str] | None = None, database: str = ":memory:", *, input_root: str | None = None, output_root: str | None = None, labels_root: str | None = None, temp_directory: str | None = None, threads: int | None = None, memory_bytes: int | None = None, max_temp_bytes: int | None = None, max_jobs: int | None = None, max_rows: int | None = None, max_input_bytes: int | None = None, max_spill_bytes: int | None = None, max_collect_bytes: int | None = None, max_model_bytes: int | None = None, max_output_bytes: int | None = None, offline: bool = True, allowed_extensions: list[str] | None = None, unsafe_debug_sql: bool = False, request_timeout: float | None = 300.0, cancel_grace: float = 5.0, kill_on_cancel_failure: bool = True):
         if request_timeout is not None and request_timeout <= 0:
             raise ValueError("request_timeout must be positive or None")
+        if cancel_grace <= 0:
+            raise ValueError("cancel_grace must be positive")
         self.request_timeout = request_timeout
+        self.cancel_grace = cancel_grace
+        self.kill_on_cancel_failure = kill_on_cancel_failure
         if command is None:
             root = Path(__file__).resolve().parents[2]
             bundled = root / "runtime" / "java" / "bin" / ("java.exe" if __import__("os").name == "nt" else "java")
@@ -123,15 +127,52 @@ class WorkerClient:
         try:
             return request.result(timeout)
         except TimeoutError as error:
-            self.cancel()
+            try:
+                acknowledgement = self._cancel_request_scoped(request.request_id)
+            except Exception as cancellation_error:
+                if self.kill_on_cancel_failure:
+                    self.cancel()
+                    raise TimeoutError(
+                        f"worker request {request.request_id} exceeded timeout of {timeout} seconds; "
+                        "request cancellation failed; worker terminated"
+                    ) from cancellation_error
+                raise TimeoutError(
+                    f"worker request {request.request_id} exceeded timeout of {timeout} seconds; "
+                    "request cancellation failed and worker was preserved"
+                ) from cancellation_error
+            if acknowledgement not in ("cancel_requested", "not_active"):
+                if self.kill_on_cancel_failure:
+                    self.cancel()
+                    raise TimeoutError(
+                        f"worker request {request.request_id} exceeded timeout of {timeout} seconds; "
+                        f"unexpected cancellation acknowledgement {acknowledgement!r}; worker terminated"
+                    ) from error
+                raise TimeoutError(
+                    f"worker request {request.request_id} exceeded timeout of {timeout} seconds; "
+                    f"unexpected cancellation acknowledgement {acknowledgement!r}; worker was preserved"
+                ) from error
             raise TimeoutError(
-                f"worker request {request.request_id} exceeded timeout of {timeout} seconds; worker terminated"
+                f"worker request {request.request_id} exceeded timeout of {timeout} seconds; "
+                "request cancelled; worker preserved"
             ) from error
+
+    def _cancel_request_scoped(self, request_id: str) -> str:
+        """Cancel one request without routing a timeout back through request()."""
+        control = self.submit("cancel " + request_id)
+        return control.result(self.cancel_grace)
 
     def cancel_request(self, request_id: str) -> str:
         if not self.OPERATION.fullmatch(request_id):
             raise ValueError("invalid worker request id")
-        return self.request("cancel " + request_id)
+        try:
+            return self._cancel_request_scoped(request_id)
+        except TimeoutError as error:
+            if self.kill_on_cancel_failure:
+                self.cancel()
+                raise TimeoutError(
+                    f"cancellation acknowledgement for {request_id} timed out; worker terminated"
+                ) from error
+            raise
 
     def _read_responses(self) -> None:
         failure: RuntimeError | None = None

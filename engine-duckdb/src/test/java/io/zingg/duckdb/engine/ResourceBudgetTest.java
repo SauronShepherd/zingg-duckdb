@@ -8,6 +8,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.util.List;
+import java.sql.Statement;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 class ResourceBudgetTest {
   @Test
@@ -24,6 +26,56 @@ class ResourceBudgetTest {
     var budget = new ResourceBudget(0, 0, 0, 0, 16, 0);
     assertThrows(DuckException.class, () -> budget.enforceCollectBytes(17));
     budget.enforceCollectBytes(16);
+  }
+
+  @Test
+  void spillBudgetCancelsAnActiveStatementWhenTheTempDirectoryGrows(@TempDir Path temp)
+      throws Exception {
+    AtomicBoolean cancelled = new AtomicBoolean();
+    Statement raw = fakeStatement(cancelled);
+    Statement guarded = SpillByteGuard.track(raw, temp, 1);
+    guarded.execute("SELECT 1");
+    Files.writeString(temp.resolve("spill.bin"), "spill");
+
+    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+    while (!cancelled.get() && System.nanoTime() < deadline) Thread.sleep(5);
+    assertTrue(cancelled.get(), "spill overage must cancel the active statement");
+    guarded.close();
+  }
+
+  @Test
+  void spillBudgetIsSharedAcrossActiveStatements(@TempDir Path temp) throws Exception {
+    AtomicBoolean firstCancelled = new AtomicBoolean();
+    AtomicBoolean secondCancelled = new AtomicBoolean();
+    Statement first = SpillByteGuard.track(fakeStatement(firstCancelled), temp, 1);
+    Statement second = SpillByteGuard.track(fakeStatement(secondCancelled), temp, 1);
+    try {
+      first.execute("SELECT 1");
+      second.execute("SELECT 1");
+      Files.writeString(temp.resolve("shared-spill.bin"), "spill");
+      long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+      while ((!firstCancelled.get() || !secondCancelled.get()) && System.nanoTime() < deadline)
+        Thread.sleep(5);
+      assertTrue(firstCancelled.get(), "first active job must be cancelled by the shared cap");
+      assertTrue(secondCancelled.get(), "second active job must be cancelled by the shared cap");
+    } finally {
+      first.close();
+      second.close();
+    }
+  }
+
+  private static Statement fakeStatement(AtomicBoolean cancelled) {
+    return (Statement) java.lang.reflect.Proxy.newProxyInstance(
+        Statement.class.getClassLoader(), new Class<?>[] {Statement.class}, (proxy, method, args) -> {
+          if (method.getName().equals("cancel")) { cancelled.set(true); return null; }
+          if (method.getName().equals("execute")) return false;
+          if (method.getName().equals("close")) return null;
+          Class<?> type = method.getReturnType();
+          if (type == boolean.class) return false;
+          if (type == int.class) return 0;
+          if (type == long.class) return 0L;
+          return null;
+        });
   }
 
   @Test

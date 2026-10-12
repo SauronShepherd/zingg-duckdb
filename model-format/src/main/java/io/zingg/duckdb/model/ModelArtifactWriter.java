@@ -124,65 +124,72 @@ public final class ModelArtifactWriter {
 
   private void publish(Path stage, ModelManifest manifest, ImportProvenance provenance,
       byte[] payload) throws IOException {
-    Path backup = root.resolveSibling("." + root.getFileName() + ".previous-" + UUID.randomUUID());
-    boolean hadPrevious = Files.exists(root, LinkOption.NOFOLLOW_LINKS);
-    boolean movedOld = false;
-    boolean publishedNew = false;
-    try {
-      checkCancelled();
-      if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
-        if (Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS))
-          throw new IOException("model artifact root must be a real directory");
-        mover.move(root, backup);
-        movedOld = true;
+    // Readers take the matching shared lock for the entire load. This keeps
+    // the existing directory layout and makes the two replacement renames one
+    // visible publication transaction to cooperating readers in other JVMs.
+    try (var publication = ModelPublicationLock.write(root, cancellationRequested)) {
+      Path backup = root.resolveSibling("." + root.getFileName() + ".previous-" + UUID.randomUUID());
+      boolean hadPrevious = Files.exists(root, LinkOption.NOFOLLOW_LINKS);
+      boolean movedOld = false;
+      boolean publishedNew = false;
+      try {
         checkCancelled();
-      }
-      mover.move(stage, root);
-      publishedNew = true;
-      checkCancelled();
-      verifyPublished(manifest, provenance, payload);
-      checkCancelled();
-    } catch (IOException | RuntimeException failure) {
-      // As with the staged-directory move below, a filesystem provider can
-      // complete the old-directory rename before surfacing an error. If the
-      // unique backup now exists and the destination disappeared, restoration
-      // is required even though the mover call did not return normally.
-      if (!movedOld && hadPrevious && !Files.exists(root, LinkOption.NOFOLLOW_LINKS)
-          && Files.exists(backup, LinkOption.NOFOLLOW_LINKS)) movedOld = true;
-      // A provider may complete a move before reporting an error. Detect the
-      // staged-directory rename by the disappearance of the private stage path.
-      if (!publishedNew && !Files.exists(stage, LinkOption.NOFOLLOW_LINKS)
-          && Files.exists(root, LinkOption.NOFOLLOW_LINKS)) publishedNew = true;
-      if (publishedNew) {
-        try {
-          deleter.delete(root);
-        } catch (IOException rollbackFailure) {
-          failure.addSuppressed(rollbackFailure);
+        if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+          if (Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("model artifact root must be a real directory");
+          mover.move(root, backup);
+          movedOld = true;
+          checkCancelled();
         }
+        mover.move(stage, root);
+        publishedNew = true;
+        checkCancelled();
+        verifyPublished(manifest, provenance, payload);
+        checkCancelled();
+      } catch (IOException | RuntimeException failure) {
+        // As with the staged-directory move below, a filesystem provider can
+        // complete the old-directory rename before surfacing an error. If the
+        // unique backup now exists and the destination disappeared, restoration
+        // is required even though the mover call did not return normally.
+        if (!movedOld && hadPrevious && !Files.exists(root, LinkOption.NOFOLLOW_LINKS)
+            && Files.exists(backup, LinkOption.NOFOLLOW_LINKS)) movedOld = true;
+        // A provider may complete a move before reporting an error. Detect the
+        // staged-directory rename by the disappearance of the private stage path.
+        if (!publishedNew && !Files.exists(stage, LinkOption.NOFOLLOW_LINKS)
+            && Files.exists(root, LinkOption.NOFOLLOW_LINKS)) publishedNew = true;
+        if (publishedNew) {
+          try {
+            deleter.delete(root);
+          } catch (IOException rollbackFailure) {
+            failure.addSuppressed(rollbackFailure);
+          }
+        }
+        if (movedOld) {
+          try {
+            mover.move(backup, root);
+          } catch (IOException rollbackFailure) {
+            failure.addSuppressed(new IOException(
+                "previous model artifact could not be restored; recovery copy remains as "
+                    + backup.getFileName(),
+                rollbackFailure));
+          }
+        }
+        throw failure;
       }
+
+      // A backup-cleanup error must never undo a verified publication. Leave the
+      // old directory recoverable and report the cleanup problem instead.
       if (movedOld) {
         try {
-          mover.move(backup, root);
-        } catch (IOException rollbackFailure) {
-          failure.addSuppressed(new IOException(
-              "previous model artifact could not be restored; recovery copy remains as "
-                  + backup.getFileName(),
-              rollbackFailure));
+          deleter.delete(backup);
+        } catch (IOException cleanupFailure) {
+          LOGGER.log(System.Logger.Level.WARNING,
+              "Published model artifact {0}, but previous artifact backup {1} remains after cleanup failure: {2}",
+              root.getFileName(), backup.getFileName(), cleanupFailure.toString());
         }
       }
-      throw failure;
-    }
-
-    // A backup-cleanup error must never undo a verified publication. Leave the
-    // old directory recoverable and report the cleanup problem instead.
-    if (movedOld) {
-      try {
-        deleter.delete(backup);
-      } catch (IOException cleanupFailure) {
-        LOGGER.log(System.Logger.Level.WARNING,
-            "Published model artifact {0}, but previous artifact backup {1} remains after cleanup failure: {2}",
-            root.getFileName(), backup.getFileName(), cleanupFailure.toString());
-      }
+    } catch (ModelPublicationLock.ModelPublicationCancelledException cancelled) {
+      throw new IOException(cancelled.getMessage(), cancelled);
     }
   }
 

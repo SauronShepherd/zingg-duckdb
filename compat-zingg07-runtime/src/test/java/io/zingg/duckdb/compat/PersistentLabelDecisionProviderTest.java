@@ -391,6 +391,32 @@ class PersistentLabelDecisionProviderTest {
   }
 
   @Test
+  void corruptJournalHeaderFailsClosedWithoutTruncatingTheValidPrefix(@TempDir Path temp)
+      throws Exception {
+    Path labels = temp.resolve("corrupt-journal");
+    var provider = new PersistentLabelDecisionProvider(labels);
+    provider.applyLabels(new LabelDecisionProvider.ApplyLabelsRequest("one", "v1", "one",
+        List.of(new LabelDecisionProvider.LabelDecision("a", "b",
+            LabelDecisionProvider.Decision.MATCH, "human"))));
+    provider.applyLabels(new LabelDecisionProvider.ApplyLabelsRequest("two", "v1", "two",
+        List.of(new LabelDecisionProvider.LabelDecision("c", "d",
+            LabelDecisionProvider.Decision.NON_MATCH, "human"))));
+    Path journal = labels.resolve("labels.applied.log");
+    byte[] valid = Files.readAllBytes(journal);
+    byte[] corruptHeader = java.nio.ByteBuffer.allocate(8)
+        .putInt(0x12345678).putInt(0).array();
+    Files.write(journal, corruptHeader, java.nio.file.StandardOpenOption.APPEND);
+    byte[] corrupt = Files.readAllBytes(journal);
+
+    DuckException failure = assertThrows(DuckException.class,
+        () -> new PersistentLabelDecisionProvider(labels));
+    assertTrue(failure.getMessage().contains("journal header is corrupt"), failure.toString());
+    assertArrayEquals(corrupt, Files.readAllBytes(journal),
+        "a corrupt header must not be silently truncated during recovery");
+    assertEquals(valid.length + corruptHeader.length, corrupt.length);
+  }
+
+  @Test
   void distinctNulBearingPairKeysSurviveSnapshotAndRecovery(@TempDir Path temp) {
     Path labels = temp.resolve("nul-pair-labels");
     var first = new LabelDecisionProvider.LabelDecision("a\u0000b", "c",

@@ -17,6 +17,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.io.TempDir;
@@ -55,6 +58,62 @@ class ModelFormatTest {
     assertEquals("CLASSIFIER", loaded.manifest().modelType());
     org.junit.jupiter.api.Assertions.assertArrayEquals(payload, loaded.payload());
     assertEquals(NativeModelStore.sha256(payload), loaded.manifest().sha256());
+  }
+
+  @Test
+  void readersCannotObserveTheGapBetweenModelReplacementRenames(@TempDir Path temp)
+      throws Exception {
+    Path output = temp.resolve("model");
+    byte[] oldPayload = "{\"kind\":\"linear-classifier\",\"version\":\"old\"}".getBytes(StandardCharsets.UTF_8);
+    byte[] newPayload = "{\"kind\":\"linear-classifier\",\"version\":\"new\"}".getBytes(StandardCharsets.UTF_8);
+    new ModelArtifactWriter(output).write(classifierManifest(), oldPayload, provenance());
+
+    var afterBackup = new CountDownLatch(1);
+    var releaseBackup = new CountDownLatch(1);
+    var failed = new AtomicBoolean();
+    var executor = Executors.newFixedThreadPool(2);
+    try {
+      var mover = (ModelArtifactWriter.AtomicMover) (source, target) -> {
+        Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        if (source.equals(output)) {
+          afterBackup.countDown();
+          try {
+            if (!releaseBackup.await(30, TimeUnit.SECONDS))
+              throw new IOException("timed out waiting to release model publication");
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("interrupted waiting to release model publication", interrupted);
+          }
+        }
+      };
+      var publisher = executor.submit(() -> new ModelArtifactWriter(output, mover, ModelFormatTest::deleteTree)
+          .write(classifierManifest(), newPayload,
+              new ImportProvenance("fixture/new-model", "new", "test-writer", Instant.EPOCH, "")));
+      assertTrue(afterBackup.await(30, TimeUnit.SECONDS), "publisher did not reach the rename gap");
+
+      var readers = executor.submit(() -> {
+        for (int i = 0; i < 50; i++) {
+          try {
+            byte[] payload = ModelReader.load(output, 1024).payload();
+            if (!java.util.Arrays.equals(payload, oldPayload)
+                && !java.util.Arrays.equals(payload, newPayload)) failed.set(true);
+          } catch (Exception failure) {
+            failed.set(true);
+          }
+        }
+      });
+      Thread.sleep(150L);
+      assertFalse(failed.get(), "a reader must wait rather than observe a missing model");
+      releaseBackup.countDown();
+      publisher.get(30, TimeUnit.SECONDS);
+      readers.get(30, TimeUnit.SECONDS);
+      assertFalse(failed.get(), "readers must observe one complete model generation");
+      org.junit.jupiter.api.Assertions.assertArrayEquals(newPayload, ModelReader.load(output, 1024).payload());
+    } finally {
+      releaseBackup.countDown();
+      executor.shutdownNow();
+      assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+    }
   }
 
   @Test

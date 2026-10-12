@@ -20,30 +20,23 @@ FIXTURE_CLASSES = Path(os.environ.get(
 @unittest.skipUnless(JAVA and WORKER_JAR.is_file(),
                      "requires Java and the packaged runtime-worker JAR")
 class PackagedWorkerCancellationTest(unittest.TestCase):
-    def test_request_timeout_reaps_packaged_worker_and_fresh_worker_recovers(self):
+    def test_request_timeout_cancels_packaged_request_and_worker_recovers(self):
         command = [JAVA, "-jar", str(WORKER_JAR), "--unsafe-debug-sql"]
-        worker = DuckWorker(command=command, request_timeout=30)
+        worker = DuckWorker(command=command, request_timeout=30, cancel_grace=2)
         process = worker.client._process
         try:
             self.assertEqual("pong", worker.ping(), "warm the packaged worker before applying timeout")
             worker.client.request_timeout = 0.05
             started = time.monotonic()
-            with self.assertRaisesRegex(TimeoutError, "worker terminated"):
+            with self.assertRaisesRegex(TimeoutError, "request cancelled; worker preserved"):
                 worker.client.request("count SELECT sum(i) FROM range(1000000000000) t(i)")
             self.assertLess(time.monotonic() - started, 8,
-                            "request timeout must terminate the active packaged worker promptly")
-            self.assertIsNotNone(process.poll(), "timed-out worker process must have exited")
-            self.assertEqual(process.returncode, process.wait(timeout=0),
-                             "the timed-out child must be reaped, not left as a zombie")
+                            "request-scoped timeout must return promptly")
+            self.assertIsNone(process.poll(), "a healthy worker must survive request-scoped cancellation")
+            self.assertEqual("pong", worker.ping(),
+                             "the same worker must accept a request after scoped cancellation")
         finally:
-            worker.client.close()
-
-        restarted = DuckWorker(command=command, request_timeout=10)
-        try:
-            self.assertEqual("pong", restarted.ping(),
-                             "a fresh packaged worker must accept requests after timeout recovery")
-        finally:
-            restarted.client.close()
+            worker.close()
 
     def test_active_request_is_cancelled_and_worker_accepts_next_request(self):
         worker = DuckWorker(command=[JAVA, "-jar", str(WORKER_JAR), "--unsafe-debug-sql"])

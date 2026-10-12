@@ -136,13 +136,53 @@ class WorkerClientHelpersTest(unittest.TestCase):
 
     def test_request_timeout_terminates_silent_worker(self):
         script = "import sys,time; sys.stdin.readline(); time.sleep(60)"
-        client = WorkerClient(command=[sys.executable, "-c", script], request_timeout=0.1)
+        client = WorkerClient(command=[sys.executable, "-c", script], request_timeout=0.1,
+                              cancel_grace=0.1)
         try:
-            with self.assertRaisesRegex(TimeoutError, "worker terminated"):
+            with self.assertRaisesRegex(TimeoutError, "request cancellation failed; worker terminated"):
                 client.request("ping")
             self.assertIsNotNone(client._process.poll())
         finally:
             client.close()
+
+    def test_request_timeout_cancels_only_timed_out_request_and_preserves_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready = Path(directory) / "started"
+            script = r'''
+import sys, threading
+from pathlib import Path
+cancelled = {}
+lock = threading.Lock()
+write_lock = threading.Lock()
+ready = Path(sys.argv[1])
+def respond(request_id, status, payload):
+    with write_lock:
+        print(request_id + "\t" + status + "\t" + payload, flush=True)
+def long_request(request_id):
+    ready.write_text("started")
+    while not cancelled.get(request_id):
+        threading.Event().wait(0.01)
+    respond(request_id, "error", "operation cancelled")
+for line in sys.stdin:
+    request_id, operation, payload = line.rstrip("\n").split("\t", 2)
+    if operation == "long":
+        with lock: cancelled[request_id] = False
+        threading.Thread(target=long_request, args=(request_id,), daemon=True).start()
+    elif operation == "cancel":
+        with lock: cancelled[payload] = True
+        respond(request_id, "ok", "cancel_requested")
+    elif operation == "ping":
+        respond(request_id, "ok", "pong")
+'''
+            client = WorkerClient(command=[sys.executable, "-c", script, str(ready)],
+                                  request_timeout=0.05, cancel_grace=0.5)
+            try:
+                with self.assertRaisesRegex(TimeoutError, "request cancelled; worker preserved"):
+                    client.request("long")
+                self.assertEqual("pong", client.request("ping"))
+                self.assertIsNone(client._process.poll())
+            finally:
+                client.close()
 
     def test_stderr_is_inherited_to_avoid_an_undrained_child_pipe(self):
         with patch("zingg_duckdb.client.subprocess.Popen") as popen:

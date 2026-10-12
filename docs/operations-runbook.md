@@ -22,7 +22,7 @@ When a worker is forcibly terminated while using a persistent DuckDB file, norma
 
 ## Native Image prerequisite
 
-Native Image remains an experimental, separate deliverable. A local Linux x64 executable was built with Oracle GraalVM 21.0.12+7.1 and passed the protocol plus classifier artifact reload/MATCH comparison against the JVM worker; evidence is recorded in `benchmarks/native-image-2026-09-29-wsl.json`. This does not qualify Windows or macOS/ARM builds, resource-limit/failure/shutdown behavior, clean installation, or release support. Release CI must provision and pin GraalVM and its native compiler toolchain, reproduce the artifact, review the Native Image deserialization warning and complete security/license checks, then run broader workload/performance qualification before enabling or distributing this artifact. The normal JVM distribution remains the supported path.
+Native Image remains an experimental, separate deliverable. The historical Linux x64 executable built with Oracle GraalVM 21.0.12+7.1 is retained only as non-supporting diagnostic evidence; current build wrappers fail closed on JDK 21 and require JDK 22+ because of DuckDB's Native Image compatibility requirement. A future release candidate must provision and pin a JDK 22+ GraalVM toolchain, reproduce a relocated artifact, review the Native Image deserialization warning and complete security/license checks, then run broader workload/performance qualification before enabling or distributing it. The normal bundled-Java 21 JVM distribution remains the supported path.
 
 ## Implemented diagnostic entry points
 

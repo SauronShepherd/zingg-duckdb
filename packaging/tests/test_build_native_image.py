@@ -58,6 +58,13 @@ class BuildNativeImageTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake.chmod(0o755)
+            fake_java = tools / "java"
+            fake_java.write_text(
+                "#!/usr/bin/env sh\n"
+                "echo 'openjdk version \"22.0.2\"' >&2\n",
+                encoding="utf-8",
+            )
+            fake_java.chmod(0o755)
             output = root / "dist"
             env = os.environ.copy()
             env["PATH"] = str(tools) + os.pathsep + env.get("PATH", "")
@@ -76,6 +83,34 @@ class BuildNativeImageTests(unittest.TestCase):
             artifact = output / "worker-test"
             manifest = json.loads((output / "worker-test.sha256.json").read_text(encoding="utf-8"))
             self.assertEqual(hashlib.sha256(artifact.read_bytes()).hexdigest(), manifest["sha256"])
+
+    def test_rejects_jdk21_for_native_image(self) -> None:
+        if SHELL is None:
+            self.skipTest("POSIX sh is unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = self._repo(root / "repo")
+            tools = root / "tools"
+            tools.mkdir()
+            fake = tools / "native-image"
+            fake.write_text("#!/usr/bin/env sh\nexit 99\n", encoding="utf-8")
+            fake.chmod(0o755)
+            fake_java = tools / "java"
+            fake_java.write_text(
+                "#!/usr/bin/env sh\n"
+                "echo 'openjdk version \"21.0.12\"' >&2\n",
+                encoding="utf-8",
+            )
+            fake_java.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(tools) + os.pathsep + env.get("PATH", "")
+            result = subprocess.run(
+                [SHELL, str(script), "native-image", str(root / "dist")],
+                env=env, capture_output=True, text=True,
+            )
+            self.assertEqual(2, result.returncode)
+            self.assertIn("JDK 22+ is required", result.stderr)
+            self.assertFalse((root / "dist").exists())
 
     def test_missing_native_image_fails_with_actionable_prerequisite(self) -> None:
         if SHELL is None:

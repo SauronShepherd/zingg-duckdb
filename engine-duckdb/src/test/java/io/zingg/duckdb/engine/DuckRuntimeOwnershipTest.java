@@ -122,6 +122,17 @@ class DuckRuntimeOwnershipTest {
   }
 
   @Test
+  void lateMaterializationRegistrationIsRejectedAfterClose(@TempDir Path temp) {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("late-registration.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config)) {
+      var job = (DuckJob) runtime.openJob();
+      job.close();
+      assertThrows(DuckException.class, () -> job.registerMaterialized("after_close"));
+    }
+  }
+
+  @Test
   void failedReadOnlyJobConstructionReturnsTheOnlyJobSlot(@TempDir Path temp) {
     Path database = temp.resolve("read-only-job.duckdb");
     var writable = new io.zingg.duckdb.api.RuntimeConfig(
