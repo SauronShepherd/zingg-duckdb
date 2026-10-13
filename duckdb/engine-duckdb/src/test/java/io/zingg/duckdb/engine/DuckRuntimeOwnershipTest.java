@@ -222,6 +222,40 @@ class DuckRuntimeOwnershipTest {
   }
 
   @Test
+  void duplicateFrameCreationPreservesTheExistingTable(@TempDir Path temp) throws Exception {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("duplicate-frame.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config); var handle = runtime.openJob()) {
+      var job = (DuckJob) handle;
+      try (var statement = job.connection().createStatement()) {
+        statement.execute("CREATE TABLE " + DuckExpr.quote(job.schemaName()) + ".existing (value VARCHAR)");
+        statement.execute("INSERT INTO " + DuckExpr.quote(job.schemaName()) + ".existing VALUES ('keep-me')");
+      }
+      assertThrows(DuckException.class, () -> job.createFrame("existing",
+          java.util.List.of("value"), java.util.List.of("VARCHAR"),
+          java.util.List.of(java.util.List.of("replace-me"))));
+      assertEquals("keep-me", job.sql("SELECT value FROM " + DuckExpr.quote(job.schemaName())
+          + ".existing").collect().get(0).get("value"));
+    }
+  }
+
+  @Test
+  void createFrameRejectsRowsOverTheJobBudgetBeforeCreatingTheTable(@TempDir Path temp) throws Exception {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("materialization-row-budget.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config);
+         var handle = runtime.openJob(new ResourceBudget(0, 1, 0, 0, 0, 0))) {
+      var job = (DuckJob) handle;
+      assertThrows(DuckException.class, () -> job.createFrame("over_budget",
+          java.util.List.of("value"), java.util.List.of("BIGINT"),
+          java.util.List.of(java.util.List.of(1L), java.util.List.of(2L))));
+      assertEquals(0L, ((Number) job.sql("SELECT COUNT(*) AS n FROM information_schema.tables "
+          + "WHERE table_schema = " + DuckExpr.literal(job.schemaName()).sql()
+          + " AND table_name = 'over_budget'").collect().get(0).get("n")).longValue());
+    }
+  }
+
+  @Test
   void cancelledTokenIsRejectedBeforeQueryExecution(@TempDir Path temp) throws Exception {
     var config = new io.zingg.duckdb.api.RuntimeConfig(
         "jdbc:duckdb:" + temp.resolve("cancel-before-start.duckdb"), 2, 0, null, 1);

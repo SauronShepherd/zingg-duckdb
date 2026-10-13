@@ -200,6 +200,66 @@ class DuckFrameMetadataTest {
   }
 
   @Test
+  void semiAndAntiJoinsKeepOnlyTheLeftLogicalSchemaForZeroColumnShapes(@TempDir Path temp) {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("zero-column-existence-joins.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config); var job = runtime.openJob()) {
+      var left = job.sql("SELECT * FROM (VALUES (1, 'a'), (2, 'b'), (3, 'c')) t(id, value)");
+      var right = job.sql("SELECT * FROM (VALUES (2), (3), (4)) t(id)");
+      var zeroLeft = left.selectZeroColumns();
+      var zeroRight = right.selectZeroColumns();
+
+      var semiOrdinary = left.join(right, "l.id = r.id", "left_semi");
+      assertEquals(List.of("id", "value"), semiOrdinary.columns());
+      assertEquals(2, semiOrdinary.count());
+      assertEquals(semiOrdinary.columns(), semiOrdinary.schema().stream()
+          .map(io.zingg.duckdb.api.Column::name).toList());
+
+      var antiOrdinary = left.join(right, "l.id = r.id", "left_anti");
+      assertEquals(List.of("id", "value"), antiOrdinary.columns());
+      assertEquals(1, antiOrdinary.count());
+
+      for (String type : List.of("left_semi", "left_anti")) {
+        var zeroLeftResult = zeroLeft.join(right, "TRUE", type);
+        assertEquals(List.of(), zeroLeftResult.columns());
+        assertEquals(List.of(), zeroLeftResult.schema());
+        assertEquals(type.equals("left_semi") ? 3 : 0, zeroLeftResult.count());
+        assertTrue(zeroLeftResult.collect().stream()
+            .allMatch(row -> row.columns().isEmpty() && row.values().isEmpty()));
+
+        var zeroRightResult = left.join(zeroRight, "TRUE", type);
+        assertEquals(List.of("id", "value"), zeroRightResult.columns());
+        assertEquals(List.of("id", "value"), zeroRightResult.schema().stream()
+            .map(io.zingg.duckdb.api.Column::name).toList());
+        assertEquals(type.equals("left_semi") ? 3 : 0, zeroRightResult.count());
+
+        var bothZeroResult = zeroLeft.join(zeroRight, "TRUE", type);
+        assertEquals(List.of(), bothZeroResult.columns());
+        assertEquals(type.equals("left_semi") ? 3 : 0, bothZeroResult.count());
+      }
+    }
+  }
+
+  @Test
+  void sampleRejectsFractionsOutsideTheClosedUnitInterval(@TempDir Path temp) {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("sample-boundaries.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config); var job = runtime.openJob()) {
+      var frame = job.sql("SELECT * FROM range(3) t(id)");
+      for (boolean withReplacement : List.of(false, true)) {
+        for (double invalid : List.of(-0.01d, 1.0000000001d, 1.2d,
+            Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
+          var failure = assertThrows(io.zingg.duckdb.api.DuckException.class,
+              () -> frame.sample(withReplacement, invalid));
+          assertTrue(failure.getMessage().startsWith("ZD_SAMPLE_FRACTION"));
+        }
+      }
+      assertEquals(3, frame.sample(false, 1.0d).count());
+      assertEquals(0, frame.sample(false, 0.0d).count());
+    }
+  }
+
+  @Test
   void withColumnEvaluatesPublicExpressionValuesInsteadOfSerializingThemAsLiterals(@TempDir Path temp) {
     var config = new io.zingg.duckdb.api.RuntimeConfig(
         "jdbc:duckdb:" + temp.resolve("with-column-expression.duckdb"), 1, 0, null, 1);

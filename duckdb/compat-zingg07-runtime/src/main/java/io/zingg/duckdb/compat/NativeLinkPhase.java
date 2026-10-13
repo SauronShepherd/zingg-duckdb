@@ -98,17 +98,19 @@ public final class NativeLinkPhase {
         }
       }
       String cluster = stamp + ":" + component.iterator().next();
-      boolean complete = component.size() <= 1 || component.stream()
-          .allMatch(id -> graph.getOrDefault(id, java.util.Set.of()).size() == component.size() - 1);
       for (String id : component) {
         double min = Double.POSITIVE_INFINITY;
         double max = Double.NEGATIVE_INFINITY;
-        for (String other : graph.getOrDefault(id, java.util.Set.of())) {
+        java.util.Set<String> neighbors = graph.getOrDefault(id, java.util.Set.of());
+        for (String other : neighbors) {
           double score = scores.get(pairKey(id, other));
           min = Math.min(min, score);
           max = Math.max(max, score);
         }
-        if (!complete) {
+        // Missing evidence is a zero score for this entity only. A sparse
+        // component must not force zero into the score range of a node that
+        // has direct evidence to every other member.
+        if (neighbors.size() < component.size() - 1) {
           min = Math.min(min, 0d);
           max = Math.max(max, 0d);
         }

@@ -119,11 +119,14 @@ public final class DuckJob implements JobHandle {
     String definitions = java.util.stream.IntStream.range(0, columns.size())
         .mapToObj(i -> DuckExpr.quote(columns.get(i)) + " " + types.get(i))
         .collect(java.util.stream.Collectors.joining(","));
+    budget.enforceRows(rows.size());
+    boolean createdHere = false;
     try (var statement = createStatement()) {
       statement.execute("CREATE TABLE " + qualified + " (" + definitions + ")");
+      createdHere = true;
       registerMaterialized(table);
     } catch (SQLException | RuntimeException e) {
-      try (var cleanup = connection.createStatement()) {
+      if (createdHere) try (var cleanup = connection.createStatement()) {
         cleanup.execute("DROP TABLE IF EXISTS " + qualified);
       } catch (SQLException cleanupFailure) { e.addSuppressed(cleanupFailure); }
       if (e instanceof DuckException duck) throw duck;
@@ -145,7 +148,7 @@ public final class DuckJob implements JobHandle {
     } catch (SQLException | RuntimeException e) {
       try (var statement = connection.createStatement()) {
         statement.execute("DROP TABLE IF EXISTS " + qualified);
-        materializedTables.remove(table);
+        synchronized (materializedTables) { materializedTables.remove(table); }
       } catch (SQLException cleanup) { e.addSuppressed(cleanup); }
       if (e instanceof DuckException duck) throw duck;
       throw new DuckException("cannot populate job-local frame", e);
@@ -165,19 +168,25 @@ public final class DuckJob implements JobHandle {
   public void close() {
     if (!closed.compareAndSet(false, true)) return;
     DuckException failure = null;
-    try {
-      java.util.List<String> tables;
-      synchronized (materializationLifecycle) {
-        synchronized (materializedTables) { tables = new java.util.ArrayList<>(materializedTables); }
-      }
-      for (String name : tables)
-        try (var statement = connection.createStatement()) {
-          statement.execute("DROP TABLE IF EXISTS " + DuckExpr.quote(schemaName) + "." + DuckExpr.quote(name));
-        }
+    java.util.List<String> tables;
+    synchronized (materializationLifecycle) {
+      synchronized (materializedTables) { tables = new java.util.ArrayList<>(materializedTables); }
+    }
+    for (String name : tables) {
       try (var statement = connection.createStatement()) {
-        statement.execute("DROP SCHEMA IF EXISTS " + DuckExpr.quote(schemaName));
+        statement.execute("DROP TABLE IF EXISTS " + DuckExpr.quote(schemaName) + "." + DuckExpr.quote(name));
+        synchronized (materializedTables) { materializedTables.remove(name); }
+      } catch (SQLException e) {
+        DuckException current = new DuckException("cannot drop job table " + name, e);
+        if (failure == null) failure = current; else failure.addSuppressed(current);
       }
-    } catch (SQLException e) { failure = new DuckException("cannot close job", e); }
+    }
+    try (var statement = connection.createStatement()) {
+      statement.execute("DROP SCHEMA IF EXISTS " + DuckExpr.quote(schemaName) + " CASCADE");
+    } catch (SQLException e) {
+      DuckException current = new DuckException("cannot drop job schema", e);
+      if (failure == null) failure = current; else failure.addSuppressed(current);
+    }
     finally {
       try { connection.close(); }
       catch (SQLException e) {

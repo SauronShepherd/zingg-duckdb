@@ -229,7 +229,31 @@ public final class DuckFrame implements Frame {
     return new DuckFrame(job,"SELECT * EXCLUDE ("+DuckExpr.quote(source)+"), "+DuckExpr.quote(source)+" AS "+DuckExpr.quote(to)+" FROM ("+plan+") zd",List.of());
   }
   public Frame join(Frame right,String condition){return join(right,condition,"inner");}
-  public Frame join(Frame right,String condition,String joinType){same(right);DuckFrame other=(DuckFrame)right;var leftColumns=availableColumns();var rightColumns=other.availableColumns();String type=joinType(joinType);if(!zeroColumns&&!other.zeroColumns)return new DuckFrame(job,"SELECT * FROM ("+plan+") l "+type+" JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition),List.of());var projections=new ArrayList<String>();for(String column:leftColumns)projections.add("l."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));for(String column:rightColumns)projections.add("r."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));boolean zeroOutput=projections.isEmpty();if(zeroOutput)projections.add("1 AS \"__zingg_zero_column_sentinel\"");return new DuckFrame(job,"SELECT "+String.join(",",projections)+" FROM ("+plan+") l "+type+" JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition),List.of(),RelationScope.QUERY_ONLY,zeroOutput);}
+  public Frame join(Frame right,String condition,String joinType){
+    same(right); DuckFrame other=(DuckFrame)right;
+    var leftColumns=availableColumns(); var rightColumns=other.availableColumns();
+    String type=joinType(joinType);
+    boolean leftOnly=type.equals("SEMI")||type.equals("ANTI");
+    String from=" FROM ("+plan+") l "+type+" JOIN ("+other.plan+") r ON "+SqlSafety.predicate(condition);
+    if(!zeroColumns&&!other.zeroColumns&&leftOnly){
+      var projections=leftColumns.stream()
+          .map(column->"l."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column)).toList();
+      return new DuckFrame(job,"SELECT "+String.join(",",projections)+from,leftColumns,
+          RelationScope.QUERY_ONLY,false);
+    }
+    if(!zeroColumns&&!other.zeroColumns)
+      return new DuckFrame(job,"SELECT *"+from,List.of());
+    var projections=new ArrayList<String>();
+    for(String column:leftColumns)
+      projections.add("l."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));
+    if(!leftOnly) for(String column:rightColumns)
+      projections.add("r."+DuckExpr.quote(column)+" AS "+DuckExpr.quote(column));
+    boolean zeroOutput=projections.isEmpty();
+    if(zeroOutput) projections.add("1 AS \"__zingg_zero_column_sentinel\"");
+    List<String> outputColumns=zeroOutput||leftOnly?leftColumns:List.of();
+    return new DuckFrame(job,"SELECT "+String.join(",",projections)+from,outputColumns,
+        RelationScope.QUERY_ONLY,zeroOutput);
+  }
   public Frame joinUsing(Frame right,String joinType,String... joinColumns){same(right);if(joinColumns==null||joinColumns.length==0)throw new DuckException("join columns are required");var leftColumns=availableColumns();var rightColumns=((DuckFrame)right).availableColumns();var resolved=new ArrayList<String>(joinColumns.length);for(String column:joinColumns){String left=column==null?null:matchingIdentifier(leftColumns,column);String other=column==null?null:matchingIdentifier(rightColumns,column);if(left==null||other==null)throw new DuckException("join column must exist on both frames: "+column);resolved.add(left);}String using=String.join(",",resolved.stream().map(DuckExpr::quote).toList());return new DuckFrame(job,"SELECT * FROM ("+plan+") l "+joinType(joinType)+" JOIN ("+((DuckFrame)right).plan+") r USING ("+using+")",List.of());}
   public Frame joinProjected(Frame right,String condition,String rightPrefix){
     same(right); if(rightPrefix==null||rightPrefix.isBlank())throw new DuckException("right column prefix is required");
@@ -279,7 +303,8 @@ public final class DuckFrame implements Frame {
   public Frame distinct(){return q("SELECT DISTINCT * FROM ("+plan+") zd");}
   public Frame dropDuplicates(String... subset){if(subset==null||subset.length==0)return distinct();var available=availableColumns();var resolved=Arrays.stream(subset).map(column->{String match=column==null?null:matchingIdentifier(available,column);if(match==null)throw new DuckException("duplicate subset column is not present: "+column);return match;}).toList();String partition=String.join(",",resolved.stream().map(DuckExpr::quote).toList());return q("SELECT * FROM ("+plan+") zd QUALIFY ROW_NUMBER() OVER (PARTITION BY "+partition+" ORDER BY "+partition+") = 1");}
   public Frame sample(boolean withReplacement,double fraction){
-    if(!Double.isFinite(fraction)||fraction<0)throw new DuckException("sample fraction must be finite and non-negative");
+    if(!Double.isFinite(fraction)||fraction<0||fraction>1)
+      throw new DuckException("ZD_SAMPLE_FRACTION: sample fraction must be finite and between 0 and 1 inclusive");
     if(!withReplacement){if(fraction==0)return filter(new DuckExpr("FALSE"));if(fraction>=1)return this;return filter(new DuckExpr("random() < "+Double.toString(fraction)));}
     if(fraction>1)throw new DuckException("sampling fraction with replacement must be at most 1");
     if(fraction==0)return filter(new DuckExpr("FALSE"));

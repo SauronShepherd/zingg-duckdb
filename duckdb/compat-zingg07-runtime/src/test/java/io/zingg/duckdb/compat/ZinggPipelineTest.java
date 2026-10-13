@@ -570,7 +570,7 @@ class ZinggPipelineTest {
         assertEquals(0d, ((Number) rows.get(0).get("z_minScore")).doubleValue());
         assertEquals(0.9d, ((Number) rows.get(0).get("z_maxScore")).doubleValue());
         assertEquals("1700000000000:1", rows.get(0).get("z_cluster"));
-        assertEquals(0d, ((Number) rows.get(1).get("z_minScore")).doubleValue());
+        assertEquals(0.7d, ((Number) rows.get(1).get("z_minScore")).doubleValue());
         assertEquals(0.9d, ((Number) rows.get(1).get("z_maxScore")).doubleValue());
         assertEquals("3", rows.get(2).get("z_zid"));
         assertEquals("7", rows.get(3).get("z_zid"));
@@ -643,7 +643,7 @@ class ZinggPipelineTest {
       assertEquals("z_zid,z_minScore,z_maxScore,z_cluster", lines.get(0));
       assertEquals(4, lines.size());
       assertTrue(lines.contains("1,0.0,0.8,1700000000000:1"));
-      assertTrue(lines.contains("2,0.0,0.8,1700000000000:1"));
+      assertTrue(lines.contains("2,0.6,0.8,1700000000000:1"));
       assertTrue(lines.contains("3,0.0,0.6,1700000000000:1"));
     }
   }
