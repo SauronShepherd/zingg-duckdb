@@ -74,7 +74,12 @@ public final class LinearClassifier implements ModelScorer {
     if (vector == null || vector.length != weights.length)
       throw new DuckException("feature vector dimensions differ");
     double value = intercept;
-    for (int index = 0; index < weights.length; index++) value += weights[index] * vector[index];
+    for (int index = 0; index < weights.length; index++) {
+      if (!Double.isFinite(vector[index]))
+        throw new DuckException("non-finite feature vector value at index: " + index);
+      value += weights[index] * vector[index];
+    }
+    if (!Double.isFinite(value)) throw new DuckException("classifier linear margin is non-finite");
     return logistic ? 1d / (1d + Math.exp(-value)) : value;
   }
 

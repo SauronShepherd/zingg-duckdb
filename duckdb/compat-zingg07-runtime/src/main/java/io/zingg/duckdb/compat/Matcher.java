@@ -31,7 +31,15 @@ public final class Matcher {
     // the DuckDB parser/native stack. LIST_SUM over one LIST_VALUE remains flat.
     String z="list_sum(list_value("+classifier.intercept()
         +(terms.isEmpty()?"":", "+String.join(", ",terms))+"))";
-    String expression=classifier.logistic()?"(1.0 / (1.0 + exp(-("+z+"))))":"("+z+")";
+    String finiteInputs = inputFeatures.stream()
+        .map(feature -> "isfinite(" + quote(feature) + ")")
+        .collect(java.util.stream.Collectors.joining(" AND "));
+    String finiteMargin = "isfinite(" + z + ")";
+    String valid = "(" + finiteInputs + " AND " + finiteMargin + ")";
+    String score = classifier.logistic()
+        ? "(1.0 / (1.0 + exp(-(" + z + "))))"
+        : "(" + z + ")";
+    String expression = "(CASE WHEN " + valid + " THEN " + score + " ELSE NULL END)";
     double threshold=classifier.threshold();
     var scored=candidates.withColumn("z_score",new io.zingg.duckdb.engine.ValidatedModelExpression(expression));
     return scored.withColumn("z_prediction",new io.zingg.duckdb.engine.DuckExpr("CASE WHEN z_score >= "+threshold+" THEN 1 ELSE 0 END"))

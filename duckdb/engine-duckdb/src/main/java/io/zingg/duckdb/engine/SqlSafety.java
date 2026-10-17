@@ -8,7 +8,9 @@ public final class SqlSafety {
   private static final Pattern DISALLOWED = Pattern.compile(
       "(?is)\\b(ATTACH|DETACH|COPY|INSTALL|LOAD|PRAGMA|CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|EXPORT|IMPORT)\\b");
   private static final Pattern MODEL_NUMBER = Pattern.compile("(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?");
-  private static final Set<String> MODEL_FUNCTIONS = Set.of("COALESCE", "EXP", "LIST_SUM", "LIST_VALUE");
+  private static final Set<String> MODEL_TOKENS = Set.of(
+      "AND", "CASE", "COALESCE", "ELSE", "END", "EXP", "ISFINITE", "LIST_SUM",
+      "LIST_VALUE", "NULL", "THEN", "WHEN");
   private static final int MAX_MODEL_EXPRESSION_LENGTH = 1_048_576;
 
   private SqlSafety() {}
@@ -66,7 +68,7 @@ public final class SqlSafety {
         while (i < expression.length()
             && (Character.isLetterOrDigit(expression.charAt(i)) || expression.charAt(i) == '_')) i++;
         String function = expression.substring(start, i).toUpperCase(java.util.Locale.ROOT);
-        if (!MODEL_FUNCTIONS.contains(function))
+        if (!MODEL_TOKENS.contains(function))
           throw new DuckException("model score expression contains an unsupported token");
         continue;
       }

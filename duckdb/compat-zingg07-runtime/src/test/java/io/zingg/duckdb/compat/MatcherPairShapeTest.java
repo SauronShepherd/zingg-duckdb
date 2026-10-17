@@ -40,4 +40,23 @@ class MatcherPairShapeTest {
       assertEquals(1, ((Number) scored.collect().get(0).get("z_prediction")).intValue());
     }
   }
+
+  @Test
+  void classifierSqlDoesNotTurnNonFiniteFeaturesIntoScores(@TempDir Path temp) {
+    var config = new io.zingg.duckdb.api.RuntimeConfig(
+        "jdbc:duckdb:" + temp.resolve("classifier-nonfinite.duckdb"), 1, 0, null, 1);
+    try (var runtime = new DuckRuntime(config); var job = runtime.openJob()) {
+      var candidates = job.sql("select * from (values "
+          + "(CAST('NaN' AS DOUBLE)), (CAST('Infinity' AS DOUBLE)), "
+          + "(1e308), (1.0)) v(feature)");
+      var classifier = new LinearClassifier(List.of("feature"), new double[] {10.0}, 0.0, true, 0.5);
+
+      var scored = new Matcher().scoreLinear(candidates,
+          new Matcher.MatchConfig("feature", "feature", "TRUE", 0.1), classifier);
+
+      assertEquals(1, scored.count(), "only the finite, non-overflowing row should score");
+      double score = ((Number) scored.collect().get(0).get("z_score")).doubleValue();
+      assertEquals(1d / (1d + Math.exp(-10d)), score, 1e-12);
+    }
+  }
 }

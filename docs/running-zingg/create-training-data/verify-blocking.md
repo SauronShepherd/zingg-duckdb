@@ -14,8 +14,6 @@ The blocking model filters your dataset before any similarity comparisons happen
 `verifyBlocking` tells you what percentage of your known matching pairs are being blocked together correctly. Run this test after configuring Zingg and again after training if you suspect missed matches.\
 <br>
 
-TODO - move to verify blocking
-
 How to inspect the blocking model, understand its coverage, and fix missed matches caused by blocking.
 
 The blocking model is the first filter in every Zingg run. It decides which record pairs the similarity model ever sees. If it places two matching records in different buckets, those records will never be compared, and the match will be missed regardless of how well everything else is configured.
@@ -32,7 +30,7 @@ The `verifyBlocking` phase produces two output directories under `zinggDir/model
 | `blockSamples` | The top 10% of records associated with each block. Use this to understand which records are being grouped together and whether the groupings make sense. |
 
 {% hint style="success" icon="right-long" %}
-**Read more**: To run the `verifyBlocking` phase and inspect output coverage→ [Verify Blocking](verify-blocking.md)
+**Read more**: To run the `verifyBlocking` phase and inspect output coverage → [Verify Blocking](../../verifyBlocking.md)
 {% endhint %}
 
 ### Why blocking coverage fails and how to fix it
@@ -85,7 +83,7 @@ influence matching.
 ### If `verifyBlocking` shows low coverage, what to do in order
 
 1. Add more labeled training pairs of the type being missed. The blocking model learns from the same training data as the similarity model. Focus on pairs that represent the variation patterns missing from your current training set.
-2. Review your field match types. Fields marked `DONT_US`E are excluded from blocking as well as similarity. If a field has a strong identity signal - a consistent identifier that appears across matching records - consider changing it from `DONT_USE` to `FUZZY`.
+2. Review your field match types. Fields marked `DONT_USE` are excluded from blocking as well as similarity. If a field has a strong identity signal - a consistent identifier that appears across matching records - consider changing it from `DONT_USE` to `FUZZY`.
 3. Check whether missed pairs share a common characteristic. If all missed pairs have empty values in a key field, empty fields cannot contribute to blocking. Either remove that field from your blocking config or improve data completeness upstream.
 4. If standard blocking consistently misses a specific pattern in your data, consider custom blocking functions.
 
@@ -95,7 +93,7 @@ influence matching.
 * [Label Training Pairs](label-training-pairs.md) - how to add more training data
 * [Configure Zingg](../configure-zingg.md) - changing field match types
 * [Blocking Strategies: DEFAULT vs WIDER](../../tuning/blocking-strategy.md) - reorder candidate fields in the blocking tree (Enterprise only)
-* [Custom Blocking and Similarity](/broken/pages/DWdyf7az3MmhJaVca3k7) Functions
+* Custom blocking and similarity functions (see the Enterprise documentation for the applicable feature guide)
 {% endhint %}
 
 {% hint style="success" icon="right-long" %}
@@ -160,10 +158,11 @@ zingg.initAndExecute()
 Read the output to inspect block coverage:
 
 ```python
-verify_output = spark.read.parquet(
-    f "{zinggDir}/{modelId}/verifyBlocking"
-)
-verify_output.show()
+verify_root = f"{zinggDir}/{modelId}/blocks/{timestamp}"
+counts = spark.read.parquet(f"{verify_root}/counts")
+block_samples = spark.read.parquet(f"{verify_root}/blockSamples")
+counts.show()
+block_samples.show()
 ```
 
 ### **What to do if coverage is low**
@@ -175,10 +174,10 @@ If `verifyBlocking` shows that many known matching pairs are not being blocked t
 3. **Try the `WIDER` blocking strategy** (Enterprise only) if large blocks suggest the tree is over-relying on one or two fields → [Blocking Strategies: DEFAULT vs WIDER](../../tuning/blocking-strategy.md)
 
 {% hint style="success" icon="right-long" %}
-**Consider custom blocking functions** for specialised data patterns → [Custom Blocking and Similarity](/broken/pages/DWdyf7az3MmhJaVca3k7)
+**Consider custom blocking functions** for specialised data patterns; consult the Enterprise documentation for the applicable feature guide.
 
 **Read more**:
 
 * Blocking model concept and how it fits in the pipeline → [Blocking Model](../../zingg-concepts/how-zingg-learns/zingg-models/blocking-model.md)
-* Custom blocking functions for advanced tuning → [Custom Blocking and Similarity](/broken/pages/DWdyf7az3MmhJaVca3k7)
+* Custom blocking functions for advanced tuning (see the Enterprise documentation for the applicable feature guide)
 {% endhint %}
